@@ -828,7 +828,8 @@ function decryptSample(key, nonce, cipher) {
 /**
  * MP4 Box 结构解析
  */
-function parseBoxes(data, start, end) {
+function parseBoxes(data, start, end, depth = 0) {
+  if (depth > 32) throw new Error('MP4 box nesting exceeds limit');
   const boxes = [];
   let off = start;
   while (off + 8 <= end) {
@@ -836,19 +837,21 @@ function parseBoxes(data, start, end) {
     const typ = data.subarray(off + 4, off + 8).toString('latin1');
     let hdr = 8;
     if (size === 1) {
+      if (off + 16 > end) throw new Error('Truncated MP4 box header');
       size = Number(data.readBigUInt64BE(off + 8));
       hdr = 16;
     } else if (size === 0) {
       size = end - off;
     }
-    if (size < hdr || off + size > end) break;
+    if (!Number.isSafeInteger(size) || size < hdr || off + size > end) throw new Error('Invalid MP4 box size');
     let children = null;
-    if (['moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf', 'udta', 'meta'].includes(typ)) {
-      children = parseBoxes(data, off + hdr, off + size);
+    if (['moov', 'trak', 'mdia', 'minf', 'stbl', 'edts', 'dinf', 'udta'].includes(typ)) {
+      children = parseBoxes(data, off + hdr, off + size, depth + 1);
     }
     boxes.push({ typ, off, size, hdr, children });
     off += size;
   }
+  if (off !== end) throw new Error('Truncated MP4 box');
   return boxes;
 }
 
@@ -1083,25 +1086,8 @@ function decryptMp4Buffer(data, key) {
   }
 
   const newMoov = rebuildMoov(data, moov.off, moov.size, top);
-  const out = [];
-  let off = 0;
-  while (off < total) {
-    let size = data.readUInt32BE(off);
-    const typ = data.subarray(off + 4, off + 8).toString('latin1');
-    let hdr = 8;
-    if (size === 1) {
-      size = Number(data.readBigUInt64BE(off + 8));
-      hdr = 16;
-    } else if (size === 0) {
-      size = total - off;
-    }
-    if (typ === 'moov') {
-      out.push(newMoov);
-    } else {
-      out.push(data.subarray(off, off + size));
-    }
-    off += size;
-  }
+  const out = top.map(box => box.typ === 'moov'
+    ? newMoov : data.subarray(box.off, box.off + box.size));
 
   return Buffer.concat(out);
 }
