@@ -243,17 +243,24 @@ class StreamService {
       }
 
       // 解析 Range 头，例如 "bytes=0-1048575"
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      let end = parts[1] ? parseInt(parts[1], 10) : total - 1;
-
-      if (isNaN(start) || isNaN(end) || start > end || start >= total) {
-        res.writeHead(416, {
-          'Content-Range': `bytes */${total}`
-        });
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      let start = NaN, end = NaN;
+      if (match && (match[1] || match[2])) {
+        if (!match[1]) {
+          const suffix = Number(match[2]);
+          if (Number.isSafeInteger(suffix) && suffix > 0) {
+            start = Math.max(0, total - suffix);
+            end = total - 1;
+          }
+        } else {
+          start = Number(match[1]);
+          end = match[2] ? Number(match[2]) : total - 1;
+        }
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= total) {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
         return res.end();
       }
-
       end = Math.min(end, total - 1);
       const chunkSize = (end - start) + 1;
 
