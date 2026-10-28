@@ -93,6 +93,7 @@ class StoreService {
       vid: String(item.vid || ''),
       position_sec: Number(item.position_sec) || 0,
       duration_sec: Number(item.duration_sec) || 0,
+      watched_indexes: Array.isArray(item.watched_indexes) ? [...new Set(item.watched_indexes.filter(index => Number.isInteger(index) && index > 0))].slice(0, 10000) : [],
       updated_at: Date.now()
     };
     return this.mutate(state => ({ state: { ...state, history: { ...state.history, [sid]: progress } }, result: progress }));

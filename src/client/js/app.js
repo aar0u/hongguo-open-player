@@ -184,6 +184,8 @@ createApp({
         if (videoEl.value) videoEl.value.pause();
         resetPlayback();
         activeSeries.value = detail;
+        const watched = detail.saved_progress?.watched_indexes || [detail.saved_progress?.episode_index];
+        watchedMap.value.set(detail.series_id, new Set(watched.filter(index => Number.isInteger(index) && index > 0)));
         activeEpisodes.value = detail.episodes;
         isFavorited.value = !!detail.is_favorite;
 
@@ -241,7 +243,7 @@ createApp({
       activeEpisodeIndex.value = ep.vid_index;
       currentTime.value = 0;
 
-      markWatched(ep.vid_index);
+
 
       nextTick(() => {
         if (videoEl.value) {
@@ -348,6 +350,7 @@ createApp({
     function onPlay(event) {
       if (event && event.target !== videoEl.value) return;
       isPlaying.value = true;
+      markWatched(activeEpisodeIndex.value);
       isBuffering.value = false;
     }
 
@@ -451,7 +454,8 @@ createApp({
           episode_index: activeEpisodeIndex.value,
           vid: curEp?.vid || '',
           position_sec: currentTime.value,
-          duration_sec: duration.value
+          duration_sec: duration.value,
+          watched_indexes: [...(watchedMap.value.get(activeSeries.value.series_id) || [])]
         })
       }).catch(err => console.warn('同步进度失败:', err));
     }

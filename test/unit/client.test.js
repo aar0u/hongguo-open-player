@@ -93,3 +93,11 @@ test('raising volume clears the underlying media mute state', () => {
   state.changeVolume();
   assert.equal(state.videoEl.value.muted, false);
 });
+
+
+test('resume restores recorded watched episodes without marking skipped episodes', async () => {
+  const state = client(async () => response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }], saved_progress: { watched_indexes: [1, 3], episode_index: 1 } }));
+  await state.openTheater({ series_id: '1' });
+  assert.equal(state.isEpisodeWatched(1), true);
+  assert.equal(state.isEpisodeWatched(2), false);
+});
