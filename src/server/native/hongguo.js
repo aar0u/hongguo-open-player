@@ -363,11 +363,6 @@ function seriesIdFromShareUrl(value) {
 async function resolveSeriesId(shareUrl) {
   if (typeof shareUrl !== 'string' || shareUrl.length > 8192) throw new Error('分享内容无效或过长');
   const trimmed = shareUrl.trim();
-  if (trimmed.startsWith('custom:')) {
-    if (!/^custom:[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}:\d{1,30}$/i.test(trimmed)) throw new Error('自定义剧集编号无效');
-    require('./custom-source').assertEnabled(trimmed);
-    return trimmed.toLowerCase();
-  }
   if (/^\d{1,30}$/.test(trimmed)) return trimmed;
   const linkPattern = /https?:\/\/[^\s<>"'，。！？；、【】（）]+/gi;
   // An explicit ID outside URLs is local input; attached links need not be visited or validated.
@@ -427,9 +422,7 @@ async function resolveSeriesId(shareUrl) {
  * 获取全集剧集列表
  */
 async function fetchEpisodeList(seriesId, options = {}) {
-  if (String(seriesId).startsWith('custom:')) return require('./custom-source').fetchEpisodeList(seriesId);
-  if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
-  if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
+  if (!/^\d{1,30}$/.test(String(seriesId))) throw Object.assign(new Error('剧集编号无效'), { status: 400 });
   return cachedRequest(`episodes:${seriesId}`, 60000,
     () => fetchEpisodeListFresh(seriesId, { deadline: Number(options.deadline) || 0 }),
     { force: options.force === true });
@@ -621,9 +614,6 @@ function parseModelVideo(vm) {
 async function fetchPlayUrlSingle(vid, sid, options = {}) {
   try {
     const quality = normalizeDownloadQuality(options.quality);
-    if (String(vid).startsWith('custom:') || String(sid).startsWith('custom:')) return require('./custom-source').fetchPlayUrlSingle(vid, sid, options);
-    if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
-    if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
     const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();
     const allowLowerQuality = options.allowLowerQuality === true && quality !== 'auto';
     const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}${allowLowerQuality ? ':lower-quality' : ''}`;
@@ -885,7 +875,14 @@ function rebuildMoov(data, moovOff, moovSize, top, order = top, relocate) {
         if (etyp === 'encv' || etyp === 'enca') {
           const hdrSize = etyp === 'encv' ? 78 : 28;
           const children = parseBoxes(data, p + 8 + hdrSize, p + esize);
-          let newType = 'mp4a';
+          let newType;
+          if (etyp === 'enca') {
+            if (data.readUInt16BE(p + 16) !== 0) throw new Error('Unsupported audio sample entry version');
+            const sinf = children.find(child => child.typ === 'sinf');
+            const frma = sinf && parseBoxes(data, sinf.off + sinf.hdr, sinf.off + sinf.size).find(child => child.typ === 'frma');
+            newType = frma && frma.size === frma.hdr + 4 ? data.toString('latin1', frma.off + frma.hdr, frma.off + frma.hdr + 4) : null;
+            if (!['mp4a', 'ac-3', 'ec-3', 'Opus', 'fLaC'].includes(newType)) throw new Error('Unsupported protected audio codec');
+          }
           if (etyp === 'encv') {
             const sinf = children.find(child => child.typ === 'sinf');
             const frma = sinf && parseBoxes(data, sinf.off + sinf.hdr, sinf.off + sinf.size).find(child => child.typ === 'frma');
@@ -977,6 +974,7 @@ function mp4TrackInfo(data, top, total) {
   function* walkBoxes(boxes) {
     for (const box of boxes) { if (box.children) yield* walkBoxes(box.children); yield box; }
   }
+  if (top.some(box => box.typ === 'moof')) throw new Error('Fragmented MP4 is not supported');
   const stbls = Array.from(walkBoxes(top)).filter(b => b.typ === 'stbl');
   const trackInfo = [];
   for (const stbl of stbls) {
@@ -984,6 +982,21 @@ function mp4TrackInfo(data, top, total) {
     const stco = getBox(stbl.children, 'stco') || getBox(stbl.children, 'co64');
     const stsc = getBox(stbl.children, 'stsc');
     const senc = getBox(stbl.children, 'senc');
+    const stsd = getBox(stbl.children, 'stsd');
+    let encrypted = false;
+    if (stsd) {
+      let cursor = stsd.off + 16;
+      const count = data.readUInt32BE(stsd.off + 12);
+      for (let i = 0; i < count; i++) {
+        if (cursor + 8 > stsd.off + stsd.size) throw new Error('Truncated MP4 sample description');
+        const size = data.readUInt32BE(cursor);
+        if (size < 8 || cursor + size > stsd.off + stsd.size) throw new Error('Invalid MP4 sample description');
+        const type = data.toString('latin1', cursor + 4, cursor + 8);
+        encrypted ||= type === 'encv' || type === 'enca';
+        cursor += size;
+      }
+    }
+    if (encrypted && (!stsz || !stco || !stsc || !senc)) throw new Error('Unsupported encrypted MP4 track layout');
     if (!stsz || !stco || !stsc) continue;
 
     const ss = data.readUInt32BE(stsz.off + 12);
@@ -1055,6 +1068,7 @@ function mp4TrackInfo(data, top, total) {
       }
     }
 
+    if (si !== n) throw new Error('MP4 sample-to-chunk count mismatch');
     trackInfo.push({ sizes, offs: sampleOffs, ivs, stco });
   }
 
@@ -1115,6 +1129,7 @@ function decryptMp4Buffer(data, key) {
 }
 
 function createMp4StreamingPlan(metadata, boxes, total) {
+  if (boxes.some(box => box.typ === 'moof')) throw new Error('Fragmented MP4 is not supported');
   const localBoxes = parseBoxes(metadata, 0, metadata.length);
   const moov = boxes.find(box => box.typ === 'moov');
   const order = boxes.filter(box => box !== moov);
