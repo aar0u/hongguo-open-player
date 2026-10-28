@@ -306,7 +306,7 @@ async function runComputerUseTest() {
     }
     // 优雅关闭应用
     try {
-      if (appProc && !appProc.killed) {
+      if (appProc.pid && appProc.exitCode === null && appProc.signalCode === null) {
         const exited = new Promise(resolve => appProc.once('exit', resolve));
         appProc.kill('SIGTERM');
         await exited;
