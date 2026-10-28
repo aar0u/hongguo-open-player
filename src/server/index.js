@@ -92,13 +92,6 @@ app.get('/api/play/:vid', async (req, res) => {
  */
 app.get('/api/stream/:vid', (req, res) => {
   const { vid } = req.params;
-  const { next_vid } = req.query;
-  // 延迟 4 秒执行下一集预加载，优先保障当前集起播带宽
-  if (next_vid) {
-    setTimeout(() => {
-      streamService.prefetch(next_vid);
-    }, 4000);
-  }
   streamService.handleStream(req, res, vid);
 });
 
