@@ -13,7 +13,7 @@
   --accent-glow: rgba(255, 51, 85, 0.35);
   --text-main: #f3f4f6;
   --text-sub: #9ca3af;
-  --text-dim: #6b7280;
+  --text-dim: #929aaa;
   --border-color: #282e3d;
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -40,6 +40,7 @@ body {
 .app-header {
   height: 60px;
   background-color: rgba(20, 23, 31, 0.9);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -317,6 +318,7 @@ html.platform-mac .app-header {
   top: 8px;
   right: 8px;
   background: rgba(0, 0, 0, 0.7);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(4px);
   color: #fff;
   font-size: 11px;
@@ -536,6 +538,7 @@ html.platform-mac .app-header {
   background: rgba(0, 0, 0, 0.6);
   padding: 20px 32px;
   border-radius: var(--radius-md);
+  -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(8px);
 }
 
@@ -878,3 +881,52 @@ html.platform-mac .app-header {
 .empty-icon {
   font-size: 48px;
 }
+
+
+/* Keyboard-accessible native seeking with a generous pointer target. */
+.progress-bar-container, .progress-bar-container:hover { height: 24px; margin-bottom: 2px; background: transparent; touch-action: none; }
+.progress-bar-container::before { content: ''; position: absolute; top: 9px; width: 100%; height: 6px; background: #2a3040; border-radius: 3px; }
+.progress-bar-buffered, .progress-bar-played { top: 9px; height: 6px; pointer-events: none; }
+.progress-bar-thumb { pointer-events: none; z-index: 1; }
+.seek-input { position: absolute; inset: 0; width: 100%; height: 24px; opacity: 0; cursor: pointer; z-index: 2; }
+.progress-bar-container:focus-within { outline: 2px solid white; outline-offset: 2px; }
+.progress-bar-container:focus-within .progress-bar-thumb { display: block; }
+.progress-time-tooltip { position: absolute; bottom: 28px; transform: translateX(-50%); padding: 4px 7px; background: #262c3a; border-radius: 4px; pointer-events: none; white-space: nowrap; }
+.app-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); padding: 12px 20px; background: #262c3a; color: white; box-shadow: var(--shadow); border-radius: 10px; z-index: 300; max-width: 90vw; }
+.player-osd { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); background: #14171fe6; color: white; padding: 12px 24px; border-radius: 12px; z-index: 10; pointer-events: none; }
+.skeleton-card { min-width: 0; }
+.skeleton-cover { aspect-ratio: 3 / 4; border-radius: 12px; }
+.skeleton-cover, .skeleton-line { background: linear-gradient(100deg, #1c202a 30%, #303747 50%, #1c202a 70%); background-size: 200% 100%; animation: skeleton-pulse 1.5s infinite; }
+.skeleton-line { height: 16px; margin-top: 12px; border-radius: 4px; }
+.skeleton-line.short { width: 60%; }
+@keyframes skeleton-pulse { to { background-position: -200% 0; } }
+.player-container { min-width: 0; }
+.player-container:fullscreen { width: 100vw; height: 100vh; }
+.player-container:fullscreen .video-stage { flex: 1; min-height: 0; }
+.theater-sidebar { flex-shrink: 0; }
+html.platform-win .app-header { padding-right: 160px; }
+@media (max-width: 1250px) {
+  .app-header { height: 110px; flex-wrap: wrap; align-content: center; row-gap: 8px; }
+  .header-left { width: 100%; }
+  .nav-tabs { flex: 1; overflow-x: auto; }
+  .header-right { width: 100%; justify-content: flex-end; }
+  .search-box { width: min(420px, 100%); }
+  .theater-view { top: 110px; height: calc(100vh - 110px); }
+  .theater-sidebar { width: 280px; }
+  .keyboard-hints { display: none; }
+  .now-playing-info { min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .playing-title { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+@media (max-width: 760px) {
+  .brand-name { display: none; }
+  .app-header { padding-left: 12px; padding-right: 12px; }
+  .nav-tabs { gap: 4px; }
+  .nav-item { padding: 8px; }
+  .theater-sidebar { position: absolute; top: 52px; bottom: 84px; right: 0; z-index: 20; width: min(300px, 85vw); box-shadow: var(--shadow); }
+  .controls-toolbar { gap: 4px; }
+  .controls-left, .controls-right { gap: 4px; }
+  .volume-slider { width: 55px; }
+  .playing-title { max-width: 130px; }
+  .player-header { padding: 0 8px; gap: 5px; }
+}
+@media (prefers-reduced-motion: reduce) { .skeleton-cover, .skeleton-line { animation: none; } }

@@ -47,6 +47,33 @@ createApp({
     const toastText = ref('');
     const osdMessage = ref('');
     let toastTimer, osdTimer;
+    const sidebarOpen = ref(true);
+    const isScrubbing = ref(false);
+    const previewTime = ref(0);
+    const previewPercent = ref(0);
+    const showPreview = ref(false);
+    function previewSeek(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const fraction = rect.width ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
+      previewPercent.value = fraction * 100;
+      previewTime.value = fraction * duration.value;
+      showPreview.value = true;
+    }
+    function seekFromSlider(event) {
+      if (!videoEl.value || !Number.isFinite(duration.value) || duration.value <= 0) return;
+      const target = Math.max(0, Math.min(duration.value, Number(event.target.value)));
+      videoEl.value.currentTime = target;
+      currentTime.value = target;
+    }
+    function startScrubbing(event) {
+      isScrubbing.value = true;
+      event.target.setPointerCapture?.(event.pointerId);
+    }
+    function finishScrubbing() {
+      isScrubbing.value = false;
+      showPreview.value = false;
+      saveProgressNow();
+    }
     function notify(message) {
       toastText.value = message;
       clearTimeout(toastTimer);
@@ -407,6 +434,7 @@ createApp({
     }
 
     function onTimeUpdate(event) {
+      if (isScrubbing.value) return;
       if (event && event.target !== videoEl.value) return;
       if (videoEl.value) {
         currentTime.value = videoEl.value.currentTime || 0;
@@ -558,7 +586,8 @@ createApp({
     });
 
     return {
-      toastText, osdMessage,
+      toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
+      previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,
       searchKeyword,

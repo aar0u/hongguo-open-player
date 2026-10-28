@@ -112,3 +112,17 @@ test('volume adjustment clears mute and resume hydrates only recorded watched ep
   assert.equal(state.isMuted.value, false);
   assert.equal(state.isBuffering.value, true);
 });
+
+test('scrubbing clamps positions and ignores playback time updates while dragging', () => {
+  const state = client(async () => response([]));
+  state.duration.value = 100;
+  state.videoEl.value = { currentTime: 10 };
+  state.startScrubbing({ target: {} });
+  state.seekFromSlider({ target: { value: 150 } });
+  assert.equal(state.videoEl.value.currentTime, 100);
+  state.videoEl.value.currentTime = 30;
+  state.onTimeUpdate();
+  assert.equal(state.currentTime.value, 100);
+  state.finishScrubbing();
+  assert.equal(state.isScrubbing.value, false);
+});
