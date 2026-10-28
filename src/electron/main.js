@@ -9,12 +9,14 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 let mainWindow = null;
 let serverInstance = null;
+let serverStart = null;
 
 async function createWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
   process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
   const { startServer } = require('../server/index.js');
-  const res = await startServer(8899);
+  serverStart ||= startServer(8899).catch(error => { serverStart = null; throw error; });
+  const res = await serverStart;
   serverInstance = res.server;
   const port = res.port;
 
@@ -45,28 +47,22 @@ async function createWindow() {
     windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
   }
 
-  mainWindow = new BrowserWindow(windowOptions);
-
-  // 3. 加载本地应用页面
+  const window = new BrowserWindow(windowOptions);
+  mainWindow = window;
   const appUrl = `http://127.0.0.1:${port}`;
-  await mainWindow.loadURL(appUrl);
-
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+  window.once('ready-to-show', () => window.show());
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) shell.openExternal(url).catch(console.error);
+    return { action: 'deny' };
   });
-
-  // 外部链接在系统默认浏览器中打开
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http:') || url.startsWith('https:')) {
-      shell.openExternal(url);
-      return { action: 'deny' };
-    }
-    return { action: 'allow' };
+  window.webContents.on('will-navigate', (event, url) => {
+    if (new URL(url).origin !== appUrl) event.preventDefault();
   });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
   });
+  await window.loadURL(appUrl);
+
 }
 
 // 构建原生 macOS 菜单栏
@@ -169,7 +165,7 @@ if (!gotTheLock) {
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
+        createWindow().catch(console.error);
       }
     });
   });
