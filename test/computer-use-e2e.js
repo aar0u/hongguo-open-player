@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -9,7 +9,7 @@ const APP_ARGS = process.env.HONGGUO_APP_PATH ? [] : [path.join(__dirname, '..')
 const os = require('node:os');
 const USER_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-ui-test-'));
 const SCREENSHOT_DIR = process.env.HONGGUO_SCREENSHOT_DIR || path.join(os.tmpdir(), 'hongguo-ui-screenshots');
-const CDP_PORT = 9222;
+let CDP_PORT = null;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -19,6 +19,7 @@ function sleep(ms) {
 async function getDebugUrl() {
   for (let i = 0; i < 40; i++) {
     try {
+      if (!CDP_PORT) { await sleep(400); continue; }
       const data = await new Promise((resolve, reject) => {
         http.get(`http://127.0.0.1:${CDP_PORT}/json`, (res) => {
           let body = '';
@@ -36,7 +37,7 @@ async function getDebugUrl() {
     }
     await sleep(400);
   }
-  throw new Error('未能连接到 Electron 远程调试端口 9222');
+  throw new Error('未能连接到 Electron 远程测试实例的调试端口');
 }
 
 // 封装 CDP 通信协议
@@ -134,12 +135,13 @@ async function runComputerUseTest() {
   const appProc = spawn(APP_PATH, [
     ...APP_ARGS,
     `--user-data-dir=${USER_DATA_DIR}`,
-    `--remote-debugging-port=${CDP_PORT}`,
+    '--remote-debugging-port=0',
     '--enable-logging'
   ], {
     stdio: 'pipe'
   });
 
+  appProc.once('error', error => console.error('启动测试实例失败:', error.message));
   appProc.stdout.on('data', (d) => {
     const s = d.toString();
     if (s.includes('DevTools') || s.includes('服务已启动') || s.includes('StreamService')) {
@@ -149,6 +151,8 @@ async function runComputerUseTest() {
 
   appProc.stderr.on('data', (d) => {
     const s = d.toString();
+    const endpoint = s.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/);
+    if (endpoint) CDP_PORT = Number(endpoint[1]);
     if (s.includes('DevTools listening') || s.includes('StreamService')) {
       process.stdout.write(`  [AppErr] ${s}`);
     }
@@ -159,7 +163,6 @@ async function runComputerUseTest() {
     const debugUrl = await getDebugUrl();
     console.log(`  ✅ 成功建立 Chrome DevTools Protocol 调试通道: ${debugUrl}`);
     cdp = new CDPClient(debugUrl);
-    appProc.once('error', error => console.error(error.message));
     await cdp.connect();
     await cdp.send('Page.enable');
     await cdp.send('DOM.enable');
@@ -304,7 +307,9 @@ async function runComputerUseTest() {
     // 优雅关闭应用
     try {
       if (appProc && !appProc.killed) {
+        const exited = new Promise(resolve => appProc.once('exit', resolve));
         appProc.kill('SIGTERM');
+        await exited;
       }
       fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
     } catch (e) {}
