@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { startServer } = require('../src/server');
+const { startServer } = require('../../src/server');
+const http = require('node:http');
 
 test('loopback API blocks foreign origins and hosts and returns JSON errors', async t => {
   const { server, port } = await startServer(0);
@@ -9,7 +10,10 @@ test('loopback API blocks foreign origins and hosts and returns JSON errors', as
   assert.equal((await fetch(`${base}/api/history`)).status, 200);
   assert.equal((await fetch(`${base}/api/history`, { headers: { Origin: base } })).status, 200);
   for (const headers of [{ Origin: 'https://evil.example' }, { Host: `evil.example:${port}` }, { 'Sec-Fetch-Site': 'cross-site' }]) {
-    assert.equal((await fetch(`${base}/api/history`, { headers })).status, 403);
+    const status = await new Promise((resolve, reject) => {
+      http.get(`${base}/api/history`, { headers }, res => { res.resume(); resolve(res.statusCode); }).on('error', reject);
+    });
+    assert.equal(status, 403, JSON.stringify(headers));
   }
   const missing = await fetch(`${base}/api/missing`);
   assert.equal(missing.status, 404);

@@ -1,8 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const web = require('../src/server/native/hongguo-search');
-const app = require('../src/server/native/hongguo-app-search');
-const Service = require('../src/server/services/dramaService').constructor;
+const web = require('../../src/server/native/hongguo-search');
+const app = require('../../src/server/native/hongguo-app-search');
+const Service = require('../../src/server/services/dramaService').constructor;
 
 test('search forwards page options and preserves App pagination cursor', async t => {
   const originalWeb = web.searchHongguo, originalApp = app.searchApp;
@@ -23,7 +23,7 @@ test('search forwards page options and preserves App pagination cursor', async t
 });
 
 test('catalog preserves terminal empty pages and never substitutes another category', async t => {
-  const catalog = require('../src/server/native/hongguo-app-catalog');
+  const catalog = require('../../src/server/native/hongguo-app-catalog');
   const original = catalog.browseList;
   t.after(() => { catalog.browseList = original; });
   const service = new Service();

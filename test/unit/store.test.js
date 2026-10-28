@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const Store = require('../src/server/services/storeService').constructor;
+const Store = require('../../src/server/services/storeService').constructor;
 
 test('store persists atomically, rejects invalid progress, and propagates write failures', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'player-store-'));

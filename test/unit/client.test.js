@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 function client(fetch) {
   let state;
-  vm.runInNewContext(fs.readFileSync(require.resolve('../src/client/js/app.js'), 'utf8'), {
+  vm.runInNewContext(fs.readFileSync(require.resolve('../../src/client/js/app.js'), 'utf8'), {
     Vue: { ref: value => ({ value }), computed: fn => ({ get value() { return fn(); } }),
       nextTick: async fn => { if (fn) fn(); }, onMounted() {}, onUnmounted() {},
       createApp: options => ({ mount() { state = options.setup(); } }) },

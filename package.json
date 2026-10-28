@@ -6,13 +6,15 @@
   "scripts": {
     "start": "node src/server/index.js",
     "app": "electron .",
-    "test": "node test/verify-e2e.js",
+    "test": "npm run test:unit && npm run test:e2e",
     "build:mac": "electron-builder --mac --arm64 --x64",
     "build:mac:arm64": "electron-builder --mac --arm64",
     "build:mac:x64": "electron-builder --mac --x64",
     "build:mac:dir": "electron-builder --mac --dir",
     "build:win": "electron-builder --win --x64",
-    "build:all": "electron-builder --mac --arm64 --x64 --win --x64"
+    "build:all": "electron-builder --mac --arm64 --x64 --win --x64",
+    "test:unit": "node test/run-unit.js",
+    "test:e2e": "node test/verify-e2e.js"
   },
   "build": {
     "appId": "com.zfdang.hongguo.openplayer",

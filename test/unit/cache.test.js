@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const StreamService = require('../src/server/services/streamService').constructor;
+const StreamService = require('../../src/server/services/streamService').constructor;
 
 test('cache prunes to a byte budget and prefetch coalesces browser probes', () => {
   const service = new StreamService();

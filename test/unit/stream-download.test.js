@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const StreamService = require('../src/server/services/streamService').constructor;
+const StreamService = require('../../src/server/services/streamService').constructor;
 
 test('all CDN candidates fail promptly or reach a third working candidate', async () => {
   const service = new StreamService();

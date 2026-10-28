@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const StreamService = require('../src/server/services/streamService').constructor;
+const StreamService = require('../../src/server/services/streamService').constructor;
 
 test('HTTP ranges support suffix/open end and reject malformed or unsafe offsets', async () => {
   const service = new StreamService();

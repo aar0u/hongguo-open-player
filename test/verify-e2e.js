@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const assert = require('assert');
 const axios = require('axios');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-e2e-'));
+process.env.HONGGUO_DATA_DIR = testDataDir;
 const { startServer } = require('../src/server/index.js');
 
 async function runTests() {
@@ -10,7 +15,7 @@ async function runTests() {
 
   let serverInstance = null;
   try {
-    const { server, port } = await startServer(8899);
+    const { server, port } = await startServer(0);
     serverInstance = server;
     const BASE_URL = `http://127.0.0.1:${port}`;
     // 1. 验证静态前端资源服务
@@ -88,7 +93,7 @@ async function runTests() {
     console.log(`  ✅ 第 4 集 (${ep4.vid}) 解析成功:`);
     console.log(`     编码: ${playData.codec}`);
     console.log(`     清晰度: ${playData.quality}`);
-    console.log(`     派生 AES-128 密钥: ${playData.contentKeyHex}\n`);
+    console.log('     AES-128 密钥派生: 成功\n');
 
     // 6. 验证流式边下边解边播代理与 Range 分片支持
     console.log('▶ [6/7] 验证流媒体解密代理服务 (GET /api/stream/:vid)...');
@@ -163,6 +168,7 @@ async function runTests() {
     if (serverInstance) {
       serverInstance.close();
     }
+    fs.rmSync(testDataDir, { recursive: true, force: true });
   }
 }
 

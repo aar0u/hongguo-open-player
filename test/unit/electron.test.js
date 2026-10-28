@@ -22,7 +22,7 @@ test('desktop recreates windows with one server and registers show before loadin
       if (name === '../server/index.js') return { startServer: async () => { starts++; return { server: { close() {} }, port: 8899 }; } };
       return require(name);
     } };
-  vm.runInNewContext(fs.readFileSync(require.resolve('../src/electron/main.js'), 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(windows[0].shown, true);
   windows[0].closed = true;

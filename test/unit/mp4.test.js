@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { decryptMp4Buffer } = require('../src/server/native/hongguo');
+const { decryptMp4Buffer } = require('../../src/server/native/hongguo');
 function box(type, payload = Buffer.alloc(0)) {
   const result = Buffer.alloc(8 + payload.length);
   result.writeUInt32BE(result.length);
