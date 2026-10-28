@@ -8,6 +8,17 @@ const storeService = require('./services/storeService');
 const app = express();
 const PORT = process.env.PORT || 8899;
 
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    // Vue's local template compiler currently requires unsafe-eval.
+    'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  });
+  next();
+});
+
 // Only the local application's own origin may access personal data or trigger downloads.
 app.use((req, res, next) => {
   const hosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];

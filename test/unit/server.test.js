@@ -7,6 +7,10 @@ test('loopback API blocks foreign origins and hosts and returns JSON errors', as
   const { server, port } = await startServer(0);
   t.after(() => new Promise(resolve => server.close(resolve)));
   const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  assert.equal(home.headers.get('x-frame-options'), 'DENY');
+  assert.equal(home.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(home.headers.get('content-security-policy'), /frame-ancestors 'none'/);
   assert.equal((await fetch(`${base}/api/history`)).status, 200);
   assert.equal((await fetch(`${base}/api/history`, { headers: { Origin: base } })).status, 200);
   for (const headers of [{ Origin: 'https://evil.example' }, { Host: `evil.example:${port}` }, { 'Sec-Fetch-Site': 'cross-site' }]) {
