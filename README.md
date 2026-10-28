@@ -40,10 +40,15 @@
 
 ## 💡 参考项目与致敬 (Acknowledgements & References)
 
-在本项目的设计与开发过程中，参考了社区中相关优秀开源项目的实践：
-* [`yangbin1322/hongguo-player`](https://github.com/yangbin1322/hongguo-player)：原第三方 macOS 客户端，提供了桌面端交互体验与原型设计参考；
-* [`jackotom/hongguo-drama`](https://github.com/jackotom/hongguo-drama)：跨平台短剧客户端，提供了多片源设计与媒体处理思路参考；
-* [`woshishiq1/drpys`](https://github.com/hjdhnx/drpy-node)：开源爬虫与媒体算法派生实践参考。
+在本项目的设计与开发过程中，参考了社区中相关优秀开源项目的实践与研究：
+
+### 🔐 视频流解密与核心算法参考
+* [`zhangbaio/hongguo`](https://github.com/zhangbaio/hongguo)：红果短剧协议解析与媒体解密研究项目，提供了 CENC 解密与 Android 接口分析参考；
+* [`N3urda/hongguoTV`](https://github.com/N3urda/hongguoTV) / [`woshishiq1/drpys`](https://github.com/hjdhnx/drpy-node)：开源短剧爬虫与算法派生实践，提供了基于 Spade-A 派生 AES 密钥的计算逻辑参考；
+* [`jackotom/hongguo-drama`](https://github.com/jackotom/hongguo-drama)：提供了 MP4 CENC 容器格式重写（消除 `sinf` 还原为 `avc1`/`hvc1`）及媒体处理参考。
+
+### 🖥️ 客户端产品与交互设计参考
+* [`yangbin1322/hongguo-player`](https://github.com/yangbin1322/hongguo-player)：原第三方 macOS 客户端，提供了 9:16 沉浸式竖屏观影体验与原型交互参考。
 
 ---
 
