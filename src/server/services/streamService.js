@@ -354,7 +354,7 @@ class StreamService {
         ...(req.headers.range ? { 'Content-Range': `bytes ${start}-${end}/${total}` } : {})
       });
       if (req.method === 'HEAD') { res.end(); return; }
-      await pipeline(Readable.from(plan.read(start, end, controller.signal)), res);
+      await pipeline(Readable.from(plan.read(start, end, controller.signal), { objectMode: false, highWaterMark: 64 * 1024 }), res);
       this.prefetch(req.query?.next_vid, quality, true);
     } catch (error) {
       this.plans.delete(`${vid}:${req.query?.quality || 'auto'}`);
