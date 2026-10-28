@@ -2,7 +2,7 @@
 
 > **核对提示（2026-10-27）**：本文是研究笔记，部分表述需要按实际源码和版本复核。已检查的开源源码中 `playback-device.js` 实现了匿名设备注册，`app-source.js` 包含请求处理与签名相关代码；因此“没有设备注册”“App 回退仅使用静态参数”等说法不适合作为设计事实。`decryptMp4File` 使用 `readFileSync` 整文件读入内存，不能据此称文件处理已流式化。官网可播范围、性能和稳定性也不能由单个版本或样本推广到所有剧集。请以 [产品设计与技术架构](产品设计与技术架构.md) 中的验证范围为准。
 
-> 本文档基于对开源项目 [`jackotom/hongguo-drama`](https://github.com/jackotom/hongguo-drama)（前身为 `hongguo-downloader`，GPL-3.0 协议）源码、解密工作流及构建体系的完整剖析编写，详细解析其多片源架构、Web 优先免签名策略、FFmpeg 媒体后处理及 WebGPU 画面增强实现。
+> 本文档为参考架构解析文档，梳理了开源项目 [`jackotom/hongguo-drama`](https://github.com/jackotom/hongguo-drama)（前身为 `hongguo-downloader`，GPL-3.0 协议）的架构设计、多片源策略及媒体处理机制，作为本项目设计与技术选型的参考资料。
 
 ---
 

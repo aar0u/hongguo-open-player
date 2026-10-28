@@ -1,18 +1,18 @@
 {
   "name": "hongguo-open-player",
   "version": "1.0.0",
-  "description": "红果开放播放器原生桌面版 (支持 macOS 原生应用 / 实时流式解密 / 免登录全集畅看)",
+  "description": "红果开放播放器原生桌面版 (支持 macOS / Windows 跨平台原生应用 / 实时流式解密 / 沉浸式竖屏观影)",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "node src/server/index.js",
     "app": "electron .",
     "test": "npm run test:unit && npm run test:e2e",
-    "build:mac": "electron-builder --mac --arm64 --x64",
-    "build:mac:arm64": "electron-builder --mac --arm64",
-    "build:mac:x64": "electron-builder --mac --x64",
-    "build:mac:dir": "electron-builder --mac --dir",
-    "build:win": "electron-builder --win --x64",
-    "build:all": "electron-builder --mac --arm64 --x64 --win --x64",
+    "build:mac": "electron-builder --mac --arm64 --x64 --publish never",
+    "build:mac:arm64": "electron-builder --mac --arm64 --publish never",
+    "build:mac:x64": "electron-builder --mac --x64 --publish never",
+    "build:mac:dir": "electron-builder --mac --dir --publish never",
+    "build:win": "electron-builder --win --x64 --publish never",
+    "build:all": "electron-builder --mac --arm64 --x64 --win --x64 --publish never",
     "test:unit": "node test/run-unit.js",
     "test:e2e": "node test/verify-e2e.js"
   },
@@ -20,6 +20,7 @@
     "appId": "com.zfdang.hongguo.openplayer",
     "productName": "红果开放播放器",
     "copyright": "Copyright © 2026",
+    "publish": null,
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"
     },
