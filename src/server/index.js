@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const express = require('express');
 const path = require('path');
+const { randomBytes } = require('node:crypto');
+const sessionToken = randomBytes(32).toString('hex');
 const dramaService = require('./services/dramaService');
 const streamService = require('./services/streamService');
 const storeService = require('./services/storeService');
@@ -24,8 +26,18 @@ app.use((req, res, next) => {
   const hosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
   if (!hosts.includes(req.headers.host) ||
       (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) ||
-      req.headers['sec-fetch-site'] === 'cross-site') {
+      ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) {
     return res.status(403).json({ error: '仅允许本地播放器访问' });
+  }
+  next();
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    const cookies = String(req.headers.cookie || '').split(';').map(value => value.trim());
+    if (!cookies.includes(`player_session=${sessionToken}`)) return res.status(401).json({ error: '请从播放器首页建立本地会话' });
+  } else if (req.path === '/' || req.path === '/index.html') {
+    res.cookie('player_session', sessionToken, { httpOnly: true, sameSite: 'strict', path: '/' });
+    res.set('Cache-Control', 'no-store');
   }
   next();
 });
