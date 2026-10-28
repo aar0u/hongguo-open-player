@@ -60,3 +60,11 @@ test('unsupported subsample and 16-byte IV CENC layouts fail explicitly', () => 
     assert.throws(() => decryptMp4Buffer(encryptedMp4(Buffer.alloc(32), Buffer.alloc(16), nonce, flags), Buffer.alloc(16)), /Unsupported CENC/);
   }
 });
+
+test('whole-file decryption preserves the encrypted input buffer', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  const input = encryptedMp4(Buffer.alloc(31), Buffer.alloc(16), Buffer.alloc(8));
+  const original = Buffer.from(input);
+  decryptMp4Buffer(input, Buffer.alloc(16));
+  assert.deepEqual(input, original);
+});

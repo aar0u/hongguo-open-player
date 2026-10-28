@@ -1045,6 +1045,11 @@ function mp4TrackInfo(data, top, total) {
     }
 
     if (!senc && stbl.children.some(box => ['saio', 'saiz'].includes(box.typ))) throw new Error('Unsupported external CENC auxiliary data');
+    if (n > 0 && (!stscTab.length || stscTab[0][0] !== 1)) throw new Error('Invalid first MP4 chunk');
+    for (let i = 0; i < stscTab.length; i++) {
+      const [first, samples] = stscTab[i];
+      if (first < 1 || first > nc || samples < 1 || samples > n || (i && first <= stscTab[i - 1][0])) throw new Error('Invalid MP4 chunk mapping');
+    }
     const chunkSpc = {};
     for (let i = 0; i < stscTab.length; i++) {
       const fc = stscTab[i][0];
@@ -1078,9 +1083,10 @@ function mp4TrackInfo(data, top, total) {
 /**
  * 解密 CENC-AES-CTR 加密的 MP4（内存版）
  * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
- * 注意：会就地修改传入的 Buffer（调用方应独占它）。
+ * 输入保持不变；整集兼容路径使用独立工作缓冲。
  */
-function decryptMp4Buffer(data, key) {
+function decryptMp4Buffer(input, key) {
+  const data = Buffer.from(input);
   const total = data.length;
   const top = parseBoxes(data, 0, total);
   const moov = top.find(b => b.typ === 'moov');
