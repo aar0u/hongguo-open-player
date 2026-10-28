@@ -14,6 +14,7 @@ test('desktop recreates windows with one server and registers show before loadin
     constructor() { super(); this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = handler => { this.open = handler; }; windows.push(this); }
     async loadURL() { this.emit('ready-to-show'); }
     show() { this.shown = true; }
+    focus() {}
   }
   let starts = 0;
   const context = { console, process: { platform: 'darwin', env: {} }, __dirname: '/repo/src/electron',
@@ -28,8 +29,15 @@ test('desktop recreates windows with one server and registers show before loadin
   windows[0].closed = true;
   windows[0].emit('closed');
   app.emit('activate');
+  app.emit('activate');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(starts, 1);
+  for (const name of ['will-navigate', 'will-redirect']) {
+    let blocked = 0;
+    for (const url of ['bad url', 'file:///etc/passwd', 'https://elsewhere.example']) windows[1].webContents.emit(name, { preventDefault() { blocked++; } }, url);
+    assert.equal(blocked, 3);
+  }
   assert.equal(windows[1].shown, true);
+  assert.equal(windows.length, 2);
   assert.equal(windows[1].open({ url: 'file:///etc/passwd' }).action, 'deny');
 });

@@ -101,7 +101,8 @@
     },
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "build/icon.ico"
     ]
   },
   "repository": {
