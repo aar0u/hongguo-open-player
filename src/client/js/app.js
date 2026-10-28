@@ -17,6 +17,9 @@ createApp({
     const currentDramas = ref([]);
     const currentPage = ref(1);
     const loadingCatalog = ref(false);
+    const hasMore = ref(false);
+    let catalogRequest = 0;
+    let submittedKeyword = '';
 
     // 剧场模式与播放器
     const videoEl = ref(null);
@@ -79,49 +82,46 @@ createApp({
     // ================= 目录与数据获取 =================
 
     async function loadCatalog() {
+      const request = ++catalogRequest;
       loadingCatalog.value = true;
       try {
-        if (currentTab.value === 'history') {
-          const res = await fetch('/api/history').then(r => r.json());
-          currentDramas.value = (res || []).map(h => ({
-            series_id: h.series_id,
-            series_title: h.series_title,
-            cover: h.cover,
-            episode_count: 0,
-            watched_index: h.episode_index
-          }));
-        } else if (currentTab.value === 'favorites') {
-          const res = await fetch('/api/favorites').then(r => r.json());
-          currentDramas.value = (res || []).map(f => ({
-            series_id: f.series_id,
-            series_title: f.series_title,
-            cover: f.cover,
-            episode_count: f.episode_count
-          }));
+        const tab = currentTab.value;
+        let url;
+        if (submittedKeyword) {
+          url = `/api/search?keyword=${encodeURIComponent(submittedKeyword)}&page=${currentPage.value}`;
+        } else if (tab === 'history' || tab === 'favorites') {
+          url = `/api/${tab}`;
         } else {
-          const res = await fetch(`/api/catalog?category=${currentTab.value}&page=${currentPage.value}`).then(r => r.json());
-          currentDramas.value = res.results || [];
+          url = `/api/catalog?category=${tab}&page=${currentPage.value}`;
+        }
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`加载失败 (${response.status})`);
+        const data = await response.json();
+        if (request !== catalogRequest) return;
+        if (Array.isArray(data)) {
+          currentDramas.value = data.map(item => ({ ...item, watched_index: item.episode_index }));
+          hasMore.value = false;
+        } else {
+          if (data.error || data.success === false) throw new Error(data.error || '加载失败');
+          currentDramas.value = data.results || [];
+          hasMore.value = !!data.hasMore;
         }
       } catch (err) {
+        if (request !== catalogRequest) return;
         console.error('加载短剧列表失败:', err);
         currentDramas.value = [];
+        hasMore.value = false;
       } finally {
-        loadingCatalog.value = false;
+        if (request === catalogRequest) loadingCatalog.value = false;
       }
     }
 
     async function handleSearch() {
       if (!searchKeyword.value.trim()) return;
-      loadingCatalog.value = true;
+      submittedKeyword = searchKeyword.value.trim();
+      currentPage.value = 1;
       viewMode.value = 'catalog';
-      try {
-        const res = await fetch(`/api/search?keyword=${encodeURIComponent(searchKeyword.value.trim())}`).then(r => r.json());
-        currentDramas.value = res.results || [];
-      } catch (err) {
-        console.error('搜索短剧失败:', err);
-      } finally {
-        loadingCatalog.value = false;
-      }
+      return loadCatalog();
     }
 
     function quickSearch(tag) {
@@ -134,6 +134,7 @@ createApp({
       currentPage.value = 1;
       viewMode.value = 'catalog';
       searchKeyword.value = '';
+      submittedKeyword = '';
       loadCatalog();
     }
 
@@ -477,6 +478,7 @@ createApp({
       currentDramas,
       currentPage,
       loadingCatalog,
+      hasMore,
       videoEl,
       activeSeries,
       activeEpisodes,
