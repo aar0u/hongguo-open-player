@@ -6,9 +6,9 @@ const { encryptedMp4 } = require('../helpers/mp4');
 const { decryptMp4Buffer } = require('../../src/server/native/hongguo');
 const { prepareRangeMedia } = require('../../src/server/services/rangeMedia');
 
-test('streaming metadata and random byte ranges match whole-file decryption without downloading the episode', async t => {
+for (const metadataLast of [false, true]) test(`streaming random byte ranges match whole-file decryption (tail moov/co64: ${metadataLast})`, async t => {
   const key = crypto.randomBytes(16);
-  const encrypted = encryptedMp4(crypto.randomBytes(2 * 1024 * 1024 + 7), key, crypto.randomBytes(8));
+  const encrypted = encryptedMp4(crypto.randomBytes(2 * 1024 * 1024 + 7), key, crypto.randomBytes(8), 0, { metadataLast, largeOffsets: metadataLast });
   const expected = decryptMp4Buffer(Buffer.from(encrypted), key);
   let transferred = 0;
   const server = http.createServer((req, res) => {
@@ -30,4 +30,11 @@ test('streaming metadata and random byte ranges match whole-file decryption with
   }
   const abort = new AbortController(); abort.abort(new Error('closed'));
   await assert.rejects(async () => { for await (const chunk of plan.read(200, 999, abort.signal)) void chunk; }, /closed/);
+});
+
+test('a CDN ignoring Range is detected before buffering its full response', async t => {
+  const server = http.createServer((req, res) => res.end(Buffer.alloc(128)));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  await assert.rejects(prepareRangeMedia({ url: `http://127.0.0.1:${server.address().port}` }, () => ({}), new AbortController().signal), { code: 'RANGE_UNSUPPORTED' });
 });
