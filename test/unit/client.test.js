@@ -2,15 +2,17 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-function client(fetch) {
+function client(fetch, overrides = {}) {
   let state;
+  const mounted = [];
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/client/js/app.js'), 'utf8'), {
     Vue: { ref: value => ({ value }), computed: fn => ({ get value() { return fn(); } }),
-      nextTick: async fn => { if (fn) fn(); }, onMounted() {}, onUnmounted() {},
+      nextTick: async fn => { if (fn) fn(); }, onMounted(fn) { mounted.push(fn); }, onUnmounted() {},
       createApp: options => ({ mount() { state = options.setup(); } }) },
     navigator: { userAgent: '' }, document: { documentElement: { classList: { add() {} } } },
-    fetch, console, alert() {}, window: { addEventListener() {}, removeEventListener() {} }
+    fetch, console, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}, window: { addEventListener() {}, removeEventListener() {} }, ...overrides
   });
+  state.mountForTest = () => mounted.forEach(fn => fn());
   return state;
 }
 const response = data => ({ ok: true, json: async () => data });
@@ -85,19 +87,28 @@ test('favoriting a long series sends metadata without its full episode list', as
   assert.ok(JSON.stringify(body).length < 1024);
 });
 
+test('fullscreen Escape preserves theater and select keys do not switch episodes', () => {
+  const listeners = {};
+  let exits = 0;
+  const doc = { documentElement: { classList: { add() {} } }, fullscreenElement: {}, exitFullscreen: async () => { exits++; } };
+  const state = client(async () => response([]), { document: doc, window: { addEventListener: (name, fn) => { listeners[name] = fn; } } });
+  state.mountForTest(); state.viewMode.value = 'theater';
+  listeners.keydown({ target: { tagName: 'DIV' }, code: 'Escape', key: 'Escape' });
+  assert.equal(exits, 1); assert.equal(state.viewMode.value, 'theater');
+  state.activeEpisodeIndex.value = 1;
+  state.activeEpisodes.value = [{ vid_index: 1 }, { vid_index: 2 }];
+  listeners.keydown({ target: { tagName: 'SELECT' }, code: 'ArrowDown', key: 'ArrowDown' });
+  assert.equal(state.activeEpisodeIndex.value, 1);
+});
 
-test('raising volume clears the underlying media mute state', () => {
-  const state = client(async () => response([]));
+test('volume adjustment clears mute and resume hydrates only recorded watched episodes', async () => {
+  const state = client(async () => response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }], saved_progress: { watched_indexes: [1, 3], episode_index: 1 } }));
+  await state.openTheater({ series_id: '1' });
+  assert.equal(state.isEpisodeWatched(1), true); assert.equal(state.isEpisodeWatched(2), false);
   state.videoEl.value = { volume: 0, muted: true };
   state.volume.value = 0.5;
   state.changeVolume();
   assert.equal(state.videoEl.value.muted, false);
-});
-
-
-test('resume restores recorded watched episodes without marking skipped episodes', async () => {
-  const state = client(async () => response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }], saved_progress: { watched_indexes: [1, 3], episode_index: 1 } }));
-  await state.openTheater({ series_id: '1' });
-  assert.equal(state.isEpisodeWatched(1), true);
-  assert.equal(state.isEpisodeWatched(2), false);
+  assert.equal(state.isMuted.value, false);
+  assert.equal(state.isBuffering.value, true);
 });
