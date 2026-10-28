@@ -1,0 +1,127 @@
+{
+  "name": "hongguo-open-player",
+  "version": "1.0.0",
+  "description": "红果开放播放器原生桌面版 (支持 macOS 原生应用 / 实时流式解密 / 免登录全集畅看)",
+  "main": "src/electron/main.js",
+  "scripts": {
+    "start": "node src/server/index.js",
+    "app": "electron .",
+    "test": "node test/verify-e2e.js",
+    "build:mac": "electron-builder --mac --arm64 --x64",
+    "build:mac:arm64": "electron-builder --mac --arm64",
+    "build:mac:x64": "electron-builder --mac --x64",
+    "build:mac:dir": "electron-builder --mac --dir",
+    "build:win": "electron-builder --win --x64",
+    "build:all": "electron-builder --mac --arm64 --x64 --win --x64"
+  },
+  "build": {
+    "appId": "com.zfdang.hongguo.openplayer",
+    "productName": "红果开放播放器",
+    "copyright": "Copyright © 2026",
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "directories": {
+      "output": "dist-electron"
+    },
+    "mac": {
+      "category": "public.app-category.video",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "title": "安装 红果开放播放器",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "红果开放播放器"
+    },
+    "files": [
+      "src/**/*",
+      "data/**/*",
+      "package.json"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdang/hongguo-open-player.git"
+  },
+  "keywords": [
+    "hongguo",
+    "short-drama",
+    "electron",
+    "macos",
+    "player"
+  ],
+  "author": "",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "axios": "^1.21.0",
+    "express": "^5.3.0",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  }
+}
