@@ -104,37 +104,35 @@ class StreamService {
     }
 
     return await new Promise((resolve, reject) => {
-      let resolved = false;
-      let finishedCount = 0;
-      let lastErr = null;
-
-      const run = (idx) => {
-        fetchOne(sorted[idx], idx).then(result => {
-          if (!resolved) {
-            resolved = true;
-            // 中止其他并发连接
-            abortControllers.forEach((c, i) => { if (i !== idx) try { c.abort(); } catch (e) {} });
-            resolve(result);
-          }
-        }).catch(err => {
-          lastErr = err;
-          finishedCount++;
-          if (finishedCount === sorted.length && !resolved) {
-            reject(lastErr || new Error('所有视频源拉取均失败'));
+      let settled = false;
+      let next = 0;
+      let failures = 0;
+      let timer;
+      const launch = () => {
+        if (settled || next >= sorted.length) return;
+        const index = next++;
+        clearTimeout(timer);
+        if (next < sorted.length) timer = setTimeout(launch, 1200);
+        fetchOne(sorted[index], index).then(result => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          abortControllers.forEach((controller, i) => { if (i !== index) controller.abort(); });
+          resolve(result);
+        }).catch(error => {
+          if (settled) return;
+          failures++;
+          if (failures === sorted.length) {
+            settled = true;
+            clearTimeout(timer);
+            reject(error);
+          } else {
+            // A failed source should not delay the next available candidate.
+            launch();
           }
         });
       };
-
-      // 启动首选节点
-      run(0);
-
-      // 若 1.2 秒内首选未返回，启动备用源并发竞速
-      setTimeout(() => {
-        if (!resolved && sorted.length > 1) {
-          console.log(`[StreamService] 首选视频源拉取耗时超 1.2s，启动备用源并发竞速: ${new URL(sorted[1].url).hostname}`);
-          run(1);
-        }
-      }, 1200);
+      launch();
     });
   }
 

@@ -3,6 +3,22 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const StreamService = require('../src/server/services/streamService').constructor;
 
+test('all CDN candidates fail promptly or reach a third working candidate', async () => {
+  const service = new StreamService();
+  const variants = [1, 2, 3].map(n => ({ url: `https://cdn.example/${n}` }));
+  const seen = [];
+  service.downloadWithParallelRanges = async url => {
+    seen.push(url);
+    if (!url.endsWith('/3')) throw new Error('offline');
+    return Buffer.from('media');
+  };
+  const result = await service.downloadFastestMedia(variants);
+  assert.equal(result.buffer.toString(), 'media');
+  assert.equal(seen.length, 3);
+  service.downloadWithParallelRanges = async () => { throw new Error('offline'); };
+  await assert.rejects(service.downloadFastestMedia(variants), /offline/);
+});
+
 test('range downloads handle tiny files and CDNs ignoring or truncating ranges', async t => {
   const body = Buffer.from('abcdefghi');
   let mode = 'ranges';
