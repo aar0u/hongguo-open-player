@@ -4,7 +4,7 @@ const http = require('node:http');
 const https = require('node:https');
 
 function guardedAgent(Agent) {
-  const agent = new Agent({ keepAlive: true });
+  const agent = new Agent({ keepAlive: true, maxSockets: 16, maxTotalSockets: 32 });
   const getName = agent.getName;
   const proxyRoute = Symbol('proxyRoute');
   // Explicit proxies may resolve privately; never lend their sockets to direct media requests.

@@ -2,9 +2,11 @@
 const axios = require('axios');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
+const { webMediaRequestOptions } = require('../native/web-media-guard');
 
 class StreamService {
-  constructor() {
+  constructor({ requestOptions = webMediaRequestOptions } = {}) {
+    this.requestOptions = requestOptions;
     // 内存 LRU 缓存：vid -> { buffer, size, timestamp }
     this.cache = new Map();
     this.maxCacheBytes = 128 * 1024 * 1024;
@@ -23,9 +25,14 @@ class StreamService {
       'Accept-Encoding': 'identity'
     };
 
+    const guarded = { ...this.requestOptions(url), maxRedirects: 0 };
+    const fragments = new AbortController();
+    const transferSignal = signal ? AbortSignal.any([signal, fragments.signal]) : fragments.signal;
+    const tasks = [];
     try {
       // 探测文件大小
       const probe = await axios.get(url, {
+        ...guarded,
         headers: { ...headers, Range: 'bytes=0-0' },
         timeout: 4000,
         responseType: 'arraybuffer',
@@ -48,18 +55,19 @@ class StreamService {
       // 并发 6~8 个连接分段下载
       const concurrency = Math.min(total, 8, Math.max(4, Math.ceil(total / (1024 * 1024))));
       const chunkSize = Math.ceil(total / concurrency);
-      const tasks = [];
 
       for (let i = 0; i < concurrency; i++) {
         const start = i * chunkSize;
-        const end = Math.min((i + 1) * chunkSize - 1, total - 1);
+        const end = Math.min(start + chunkSize - 1, total - 1);
+        if (start > end) break;
         tasks.push(
           axios.get(url, {
+            ...guarded,
             responseType: 'arraybuffer',
             headers: { ...headers, Range: `bytes=${start}-${end}` },
             maxContentLength: 64 * 1024 * 1024,
             timeout: timeoutMs,
-            signal
+            signal: transferSignal
           }).then(r => {
             const chunk = Buffer.from(r.data);
             if (r.status !== 206 || r.headers['content-range'] !== `bytes ${start}-${end}/${total}` || chunk.length !== end - start + 1) {
@@ -73,9 +81,11 @@ class StreamService {
       const chunks = await Promise.all(tasks);
       return Buffer.concat(chunks);
     } catch (e) {
+      fragments.abort();
+      await Promise.allSettled(tasks);
       if (signal && signal.aborted) throw e;
       // 兜底降级为普通全量下载
-      const fallback = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, maxContentLength: 64 * 1024 * 1024, signal });
+      const fallback = await axios.get(url, { ...guarded, responseType: 'arraybuffer', headers, timeout: timeoutMs, maxContentLength: 64 * 1024 * 1024, signal });
       return Buffer.from(fallback.data);
     }
   }
