@@ -4,8 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-const APP_PATH = path.join(__dirname, '../dist-electron/mac-arm64/红果开放播放器.app/Contents/MacOS/红果开放播放器');
-const SCREENSHOT_DIR = '/Users/zfdang/.gemini/antigravity/brain/220b2044-22eb-481a-9093-469f02a930a6/screenshots';
+const APP_PATH = process.env.HONGGUO_APP_PATH || require('electron');
+const APP_ARGS = process.env.HONGGUO_APP_PATH ? [] : [path.join(__dirname, '..')];
+const os = require('node:os');
+const USER_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hongguo-ui-test-'));
+const SCREENSHOT_DIR = process.env.HONGGUO_SCREENSHOT_DIR || path.join(os.tmpdir(), 'hongguo-ui-screenshots');
 const CDP_PORT = 9222;
 
 function sleep(ms) {
@@ -126,16 +129,11 @@ async function runComputerUseTest() {
 
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-  // 1. 确保旧实例已清理
-  try {
-    execSync('pkill -9 -f "红果开放播放器" 2>/dev/null || true');
-    execSync('pkill -9 -f "Electron" 2>/dev/null || true');
-    await sleep(500);
-  } catch (e) {}
-
   // 2. 原生启动 macOS 应用程序并开启 CDP 调试通道
   console.log('▶ [1/6] 启动原生 macOS 应用程序 (红果开放播放器.app)...');
   const appProc = spawn(APP_PATH, [
+    ...APP_ARGS,
+    `--user-data-dir=${USER_DATA_DIR}`,
     `--remote-debugging-port=${CDP_PORT}`,
     '--enable-logging'
   ], {
@@ -161,6 +159,7 @@ async function runComputerUseTest() {
     const debugUrl = await getDebugUrl();
     console.log(`  ✅ 成功建立 Chrome DevTools Protocol 调试通道: ${debugUrl}`);
     cdp = new CDPClient(debugUrl);
+    appProc.once('error', error => console.error(error.message));
     await cdp.connect();
     await cdp.send('Page.enable');
     await cdp.send('DOM.enable');
@@ -260,6 +259,7 @@ async function runComputerUseTest() {
     await cdp.sendKey(' ', 'Space', 32);
     await sleep(800);
     const pausedState = await cdp.eval('document.querySelector("video.video-element")?.paused');
+    if (!pausedState) throw new Error('空格键未暂停视频');
     console.log(`  视频暂停状态校验: ${pausedState ? '✅ 已成功暂停' : '❌ 未暂停'}`);
     await cdp.captureScreenshot('04_keyboard_space_pause.png');
 
@@ -268,6 +268,7 @@ async function runComputerUseTest() {
     await cdp.sendKey(' ', 'Space', 32);
     await sleep(800);
     const resumedState = await cdp.eval('document.querySelector("video.video-element")?.paused');
+    if (resumedState) throw new Error('空格键未恢复视频播放');
     console.log(`  视频恢复播放校验: ${!resumedState ? '✅ 已恢复播放' : '❌ 仍暂停'}`);
 
     // 6.2 模拟按下向下方向键 ↓ 切到下一集
@@ -278,7 +279,7 @@ async function runComputerUseTest() {
     const ep2Info = await cdp.eval(`
       (() => {
         const v = document.querySelector("video.video-element");
-        const activeEp = document.querySelector(".ep-btn.active")?.innerText;
+        const activeEp = document.querySelector(".episode-btn.active")?.innerText;
         return {
           activeEp,
           currentTime: v ? v.currentTime : 0,
@@ -287,20 +288,11 @@ async function runComputerUseTest() {
         };
       })()
     `);
+    if (!ep2Info.src || ep2Info.src === videoInfo.currentSrc) throw new Error('下一集未切换播放源');
     console.log(`  切集后激活分集: 第 ${ep2Info.activeEp} 集`);
     console.log(`  切集后播放源: ${ep2Info.src}`);
     await cdp.captureScreenshot('05_arrow_down_next_episode.png');
     console.log('  ✅ 键盘方向键无感秒切下一集测试通过');
-
-    // 7. 捕获真实系统原生窗口截图
-    console.log('\n▶ [6/6] 捕获 macOS 系统原生窗口截图...');
-    const macosScreenPath = path.join(SCREENSHOT_DIR, '06_macos_native_window.png');
-    try {
-      execSync(`screencapture -x -o "${macosScreenPath}"`);
-      console.log(`  📸 macOS 屏幕完整截图已保存: 06_macos_native_window.png`);
-    } catch (e) {
-      console.warn('  screencapture 警告:', e.message);
-    }
 
     console.log('\n======================================================');
     console.log('🎉 Computer Use 原生端到端交互自动化测试全部成功通过！');
@@ -314,7 +306,7 @@ async function runComputerUseTest() {
       if (appProc && !appProc.killed) {
         appProc.kill('SIGTERM');
       }
-      execSync('pkill -9 -f "红果开放播放器" 2>/dev/null || true');
+      fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
     } catch (e) {}
   }
 }
