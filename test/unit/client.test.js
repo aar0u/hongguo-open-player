@@ -84,3 +84,12 @@ test('favoriting a long series sends metadata without its full episode list', as
   assert.equal(body.episodes, undefined);
   assert.ok(JSON.stringify(body).length < 1024);
 });
+
+
+test('raising volume clears the underlying media mute state', () => {
+  const state = client(async () => response([]));
+  state.videoEl.value = { volume: 0, muted: true };
+  state.volume.value = 0.5;
+  state.changeVolume();
+  assert.equal(state.videoEl.value.muted, false);
+});

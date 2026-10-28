@@ -303,6 +303,7 @@ createApp({
       if (videoEl.value) {
         videoEl.value.volume = parseFloat(volume.value);
         isMuted.value = (videoEl.value.volume === 0);
+        videoEl.value.muted = isMuted.value;
       }
     }
 
