@@ -13,9 +13,128 @@ class StreamService {
   }
 
   /**
+   * 并发分片加速拉取：突破字节 CDN 单连接 256KB/s 限速，多连接跑满本地带宽 (1~1.5秒拉取整集)
+   */
+  async downloadWithParallelRanges(url, userAgent, timeoutMs = 20000, signal = null) {
+    const headers = {
+      'User-Agent': userAgent || 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)',
+      'Accept-Encoding': 'identity'
+    };
+
+    try {
+      // 探测文件大小
+      const probe = await axios.get(url, {
+        headers: { ...headers, Range: 'bytes=0-0' },
+        timeout: 4000,
+        signal
+      });
+
+      const rangeHeader = probe.headers['content-range'];
+      if (!rangeHeader) {
+        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
+        return Buffer.from(full.data);
+      }
+
+      const total = parseInt(rangeHeader.split('/')[1], 10);
+      if (isNaN(total) || total <= 0) {
+        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
+        return Buffer.from(full.data);
+      }
+
+      // 并发 6~8 个连接分段下载
+      const concurrency = Math.min(8, Math.max(4, Math.ceil(total / (1024 * 1024))));
+      const chunkSize = Math.ceil(total / concurrency);
+      const tasks = [];
+
+      for (let i = 0; i < concurrency; i++) {
+        const start = i * chunkSize;
+        const end = Math.min((i + 1) * chunkSize - 1, total - 1);
+        tasks.push(
+          axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: { ...headers, Range: `bytes=${start}-${end}` },
+            timeout: timeoutMs,
+            signal
+          }).then(r => Buffer.from(r.data))
+        );
+      }
+
+      const chunks = await Promise.all(tasks);
+      return Buffer.concat(chunks);
+    } catch (e) {
+      if (signal && signal.aborted) throw e;
+      // 兜底降级为普通全量下载
+      const fallback = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
+      return Buffer.from(fallback.data);
+    }
+  }
+
+  /**
+   * 智能下载：排序边缘 CDN 节点并支持 1.5s 备用节点竞速，解决个别主域名 (如 v9-reading-video) 限速 30 秒卡顿问题
+   */
+  async downloadFastestMedia(variants, defaultVariant, timeoutMs = 25000) {
+    const list = Array.isArray(variants) && variants.length > 0 ? variants : [defaultVariant];
+    // 智能排序：优先排除受限速的主节点，优先选择边缘高速 CDN
+    const sorted = [...list].sort((a, b) => {
+      const aBad = a.url.includes('v9-reading-video') ? 1 : 0;
+      const bBad = b.url.includes('v9-reading-video') ? 1 : 0;
+      return aBad - bBad;
+    });
+
+    const abortControllers = sorted.map(() => new AbortController());
+
+    const fetchOne = async (variant, index) => {
+      const controller = abortControllers[index];
+      const host = new URL(variant.url).hostname;
+      const t0 = Date.now();
+      const buffer = await this.downloadWithParallelRanges(variant.url, variant.userAgent, timeoutMs, controller.signal);
+      console.log(`[StreamService] ⚡ 并发分片加速从 [${host}] 下载完毕: ${buffer.length} 字节，耗时 ${Date.now() - t0}ms`);
+      return { buffer, variant };
+    };
+
+    if (sorted.length === 1) {
+      return await fetchOne(sorted[0], 0);
+    }
+
+    return await new Promise((resolve, reject) => {
+      let resolved = false;
+      let finishedCount = 0;
+      let lastErr = null;
+
+      const run = (idx) => {
+        fetchOne(sorted[idx], idx).then(result => {
+          if (!resolved) {
+            resolved = true;
+            // 中止其他并发连接
+            abortControllers.forEach((c, i) => { if (i !== idx) try { c.abort(); } catch (e) {} });
+            resolve(result);
+          }
+        }).catch(err => {
+          lastErr = err;
+          finishedCount++;
+          if (finishedCount === sorted.length && !resolved) {
+            reject(lastErr || new Error('所有视频源拉取均失败'));
+          }
+        });
+      };
+
+      // 启动首选节点
+      run(0);
+
+      // 若 1.2 秒内首选未返回，启动备用源并发竞速
+      setTimeout(() => {
+        if (!resolved && sorted.length > 1) {
+          console.log(`[StreamService] 首选视频源拉取耗时超 1.2s，启动备用源并发竞速: ${new URL(sorted[1].url).hostname}`);
+          run(1);
+        }
+      }, 1200);
+    });
+  }
+
+  /**
    * 获取或解密得到指定 vid 的明文 MP4 Buffer
    */
-  async getDecryptedBuffer(vid, quality = '1080p') {
+  async getDecryptedBuffer(vid, quality = 'auto') {
     const key = String(vid);
     // 1. 命中内存缓存
     if (this.cache.has(key)) {
@@ -32,26 +151,18 @@ class StreamService {
     const task = (async () => {
       try {
         console.log(`[StreamService] 正在解析视频播放地址 vid: ${key}`);
-        const playInfo = await appSource.fetchAppPlayUrl(key, { quality });
+        const playInfo = await appSource.fetchAppPlayUrl(key, { quality, allowLowerQuality: true });
         if (!playInfo || !playInfo.url) {
           throw new Error('未获取到有效的视频流链接');
         }
 
-        console.log(`[StreamService] 正在拉取加密媒体流 (${playInfo.codec}, ${playInfo.quality}): ${playInfo.url.slice(0, 80)}...`);
-        const mediaRes = await axios.get(playInfo.url, {
-          responseType: 'arraybuffer',
-          timeout: 45000,
-          headers: {
-            'User-Agent': playInfo.userAgent || 'com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)',
-            'Accept-Encoding': 'identity'
-          }
-        });
+        console.log(`[StreamService] 正在多源极速拉取媒体流 (${playInfo.codec}, ${playInfo.quality})...`);
+        const { buffer: encryptedBuf, variant: chosenVariant } = await this.downloadFastestMedia(playInfo.variants, playInfo);
 
-        const encryptedBuf = Buffer.from(mediaRes.data);
-        console.log(`[StreamService] 下载完成 (${encryptedBuf.length} bytes)，正在解密 MP4 CENC 样本...`);
+        console.log(`[StreamService] 正在解密 MP4 CENC 样本 (${encryptedBuf.length} bytes)...`);
 
         // 密钥派生与解密
-        const contentKey = playInfo.contentKey;
+        const contentKey = chosenVariant.contentKey || playInfo.contentKey;
         const keyBuf = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(String(contentKey), 'hex');
         const decryptedBuf = decryptMp4Buffer(encryptedBuf, keyBuf);
         console.log(`[StreamService] 解密完成 (${decryptedBuf.length} bytes)，已写入流式缓存`);

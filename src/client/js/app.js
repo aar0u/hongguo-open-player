@@ -31,6 +31,7 @@ createApp({
     const isMuted = ref(false);
     const watchedMap = ref(new Map()); // seriesId -> Set(epIndexes)
     let progressTimer = null;
+    let pendingResumeSec = 0;
 
     // 当前选集分组
     const currentGroup = ref({ start: 1, end: 30 });
@@ -174,12 +175,15 @@ createApp({
         const matchedGroup = groups.find(g => targetIndex >= g.start && targetIndex <= g.end);
         if (matchedGroup) currentGroup.value = matchedGroup;
 
+        pendingResumeSec = resumeSec;
         viewMode.value = 'theater';
 
         await nextTick();
         if (videoEl.value) {
-          videoEl.value.currentTime = resumeSec;
-          videoEl.value.play().catch(e => console.log('自动播放需要用户交互:', e));
+          videoEl.value.play().catch(e => {
+            console.log('自动播放需要用户交互唤醒:', e.message);
+            isBuffering.value = false;
+          });
         }
       } catch (err) {
         console.error('打开剧场失败:', err);
@@ -211,7 +215,10 @@ createApp({
       nextTick(() => {
         if (videoEl.value) {
           videoEl.value.currentTime = 0;
-          videoEl.value.play().catch(e => console.log('播放被拦截:', e));
+          videoEl.value.play().catch(e => {
+            console.log('播放被策略拦截，等待用户交互:', e.message);
+            isBuffering.value = false;
+          });
         }
       });
     }
@@ -306,6 +313,16 @@ createApp({
       isBuffering.value = false;
     }
 
+    function onCanPlay() {
+      isBuffering.value = false;
+      if (videoEl.value && videoEl.value.paused) {
+        videoEl.value.play().catch(e => {
+          console.log('[Player] 自动播放需交互:', e.message);
+          isBuffering.value = false;
+        });
+      }
+    }
+
     function onPause() {
       isPlaying.value = false;
       saveProgressNow();
@@ -315,6 +332,14 @@ createApp({
       if (videoEl.value) {
         duration.value = videoEl.value.duration || 0;
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
+        if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
+          try {
+            videoEl.value.currentTime = pendingResumeSec;
+          } catch (e) {
+            console.warn('恢复历史播放位置失败:', e);
+          }
+          pendingResumeSec = 0;
+        }
       }
     }
 
@@ -487,6 +512,7 @@ createApp({
       toggleFavCurrent,
       onPlay,
       onPause,
+      onCanPlay,
       onLoadedMetadata,
       onTimeUpdate,
       onEnded,

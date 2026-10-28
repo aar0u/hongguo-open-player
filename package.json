@@ -1,7 +1,7 @@
 {
   "name": "hongguo-open-player",
   "version": "1.0.0",
-  "description": "红果短剧原生桌面播放器 (支持 macOS 原生应用 / 实时流式解密 / 免登录全集畅看)",
+  "description": "红果开放播放器原生桌面版 (支持 macOS 原生应用 / 实时流式解密 / 免登录全集畅看)",
   "main": "src/electron/main.js",
   "scripts": {
     "start": "node src/server/index.js",
@@ -13,8 +13,8 @@
     "build:mac:dir": "electron-builder --mac --dir"
   },
   "build": {
-    "appId": "com.zfdang.hongguo.player",
-    "productName": "红果短剧",
+    "appId": "com.zfdang.hongguo.openplayer",
+    "productName": "红果开放播放器",
     "copyright": "Copyright © 2026",
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"
@@ -46,7 +46,7 @@
       "gatekeeperAssess": false
     },
     "dmg": {
-      "title": "安装 红果短剧",
+      "title": "安装 红果开放播放器",
       "contents": [
         {
           "x": 130,

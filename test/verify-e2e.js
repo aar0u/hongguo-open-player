@@ -5,7 +5,7 @@ const { startServer } = require('../src/server/index.js');
 
 async function runTests() {
   console.log('\n======================================================');
-  console.log('🧪 开始红果短剧全链路自动化端到端测试 (E2E Verification)');
+  console.log('🧪 开始红果开放播放器全链路自动化端到端测试 (E2E Verification)');
   console.log('======================================================\n');
 
   let serverInstance = null;
@@ -17,7 +17,7 @@ async function runTests() {
     console.log('▶ [1/7] 验证静态前端资源交付...');
     const htmlRes = await axios.get(`${BASE_URL}/`);
     assert.strictEqual(htmlRes.status, 200);
-    assert(htmlRes.data.includes('红果短剧桌面播放器'), 'index.html 标题应正确');
+    assert(htmlRes.data.includes('红果开放播放器'), 'index.html 标题应正确');
     assert(htmlRes.data.includes('vue.global.prod.js'), '应包含本地 Vue 3 引用');
 
     const jsRes = await axios.get(`${BASE_URL}/js/app.js`);

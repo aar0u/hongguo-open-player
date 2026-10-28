@@ -3,6 +3,11 @@ const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
 const { startServer } = require('../server/index.js');
 
+// 必须在 app.whenReady 之前注入 Chromium 硬件解码与 macOS VideoToolbox HEVC (H.265) 解码开关
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,PlatformHEVCEncoderSupport');
+app.commandLine.appendSwitch('enable-accelerated-video-decode');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 let mainWindow = null;
 let serverInstance = null;
 
@@ -18,7 +23,7 @@ async function createWindow() {
     height: 840,
     minWidth: 960,
     minHeight: 640,
-    title: '红果短剧',
+    title: '红果开放播放器',
     titleBarStyle: 'hiddenInset', // 优雅的 macOS 胶囊红绿灯一体化标题栏
     trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f1015',
@@ -60,17 +65,17 @@ function setupMenu() {
     ...(isMac
       ? [
           {
-            label: '红果短剧',
+            label: '红果开放播放器',
             submenu: [
-              { role: 'about', label: '关于 红果短剧' },
+              { role: 'about', label: '关于 红果开放播放器' },
               { type: 'separator' },
               { role: 'services', label: '服务' },
               { type: 'separator' },
-              { role: 'hide', label: '隐藏 红果短剧' },
+              { role: 'hide', label: '隐藏 红果开放播放器' },
               { role: 'hideOthers', label: '隐藏其他' },
               { role: 'unhide', label: '全部显示' },
               { type: 'separator' },
-              { role: 'quit', label: '退出 红果短剧' }
+              { role: 'quit', label: '退出 红果开放播放器' }
             ]
           }
         ]

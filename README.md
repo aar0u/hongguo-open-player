@@ -1,16 +1,16 @@
-# 🎬 红果短剧桌面播放器 (Hongguo Open Player)
+# 🎬 红果开放播放器 (Hongguo Open Player)
 
 [![CI](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml)
 [![Release](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-基于 **`hongguo-player`** 逆向架构自主实现的红果短剧原生桌面播放客户端。无需安卓模拟器，内置 MP4 CENC 实时流式解密代理与全量分集突破，提供 9:16 沉浸式竖屏刷剧体验。
+基于 **`hongguo-player`** 逆向架构自主实现的红果开放原生桌面播放客户端。无需安卓模拟器，内置 MP4 CENC 实时流式解密代理与全量分集突破，提供 9:16 沉浸式竖屏刷剧体验。
 
 ---
 
 ## ✨ 核心特性
 
-* **🚀 免模拟器极速播放**：直接在桌面端原生直连红果短剧服务端，告别笨重的安卓模拟器；
+* **🚀 免模拟器极速播放**：直接在桌面端原生直连红果服务端，告别笨重的安卓模拟器；
 * **🎬 实时流式解密代理**：内置基于 Spade-A 派生算法的 CENC-MP4 流式解密中间件，动态重写 MP4 容器（消除 `sinf` 还原为 `avc1`/`hvc1`），支持标准 HTTP Range 分片请求与 Seek 拖拽；
 * **🔓 全集突破**：自动突破网页端通常仅公开前 3 集的限制，结合匿名移动端协议仿真获取整部剧（80~100+ 集）全部剧集；
 * **⚡ 无感预加载**：播放当前集时，代理服务在后台自动拉取解密下一集，连播切集 0 毫秒等待；
@@ -42,9 +42,9 @@
 ### 方式 1：直接下载 macOS 原生桌面版 (推荐，开箱即用)
 
 前往 [GitHub Releases](https://github.com/zfdang/hongguo-open-player/releases) 下载最新构建好的原生 macOS 应用安装包，**无需打开浏览器，双击即看**：
-* **Apple Silicon (M1/M2/M3/M4 芯片)**：下载 `红果短剧-*-arm64.dmg`，双击拖入 `Applications` 即可运行；
-* **Intel 芯片**：下载 `红果短剧-*.dmg` (或包含 x64 字样)；
-* **免安装 ZIP 绿色版**：下载 `*-mac.zip`，解压后直接双击 `红果短剧.app` 启动。
+* **Apple Silicon (M1/M2/M3/M4 芯片)**：下载 `红果开放播放器-*-arm64.dmg`，双击拖入 `Applications` 即可运行；
+* **Intel 芯片**：下载 `红果开放播放器-*.dmg` (或包含 x64 字样)；
+* **免安装 ZIP 绿色版**：下载 `*-mac.zip`，解压后直接双击 `红果开放播放器.app` 启动。
 
 ### 方式 2：本地运行原生桌面客户端 (开发/调试)
 
@@ -103,9 +103,9 @@ npm test
   1. 运行全链路端到端测试与接口校验；
   2. 自动递增版本编号（基于 tag 或 run number）；
   3. 通过 `electron-builder` 自动化构建 macOS 原生应用：
-     * `红果短剧-*-arm64.dmg` (Apple Silicon 芯片专用安装包)
-     * `红果短剧-*.dmg` (Intel 芯片专用安装包)
-     * `红果短剧-*-mac.zip` (绿色便携解压即用版)
+     * `红果开放播放器-*-arm64.dmg` (Apple Silicon 芯片专用安装包)
+     * `红果开放播放器-*.dmg` (Intel 芯片专用安装包)
+     * `红果开放播放器-*-mac.zip` (绿色便携解压即用版)
   4. 自动生成 SHA256 校验和清单，并将所有 DMG/ZIP 安装包附挂在 GitHub Releases 供用户直接下载。
 
 ---

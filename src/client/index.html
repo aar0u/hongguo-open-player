@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>红果短剧桌面播放器 - Hongguo Open Player</title>
+  <title>红果开放播放器 - Hongguo Open Player</title>
   <link rel="stylesheet" href="/css/app.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
 </head>
@@ -12,10 +12,9 @@
     <!-- 顶部导航栏 -->
     <header class="app-header">
       <div class="header-left">
-        <div class="brand" @click="goHome">
+        <div class="brand" @click="goHome" title="返回首页">
           <span class="brand-icon">🎬</span>
-          <span class="brand-name">红果短剧</span>
-          <span class="brand-tag">桌面版</span>
+          <span class="brand-name"><span class="brand-accent">红果</span>开放播放器</span>
         </div>
         <nav class="nav-tabs">
           <button class="nav-item" :class="{ active: currentTab === 'hot-drama' && viewMode === 'catalog' }" @click="switchTab('hot-drama')">🔥 热门榜单</button>
@@ -124,8 +123,11 @@
               :src="currentStreamUrl"
               playsinline
               preload="auto"
+              autoplay
               @play="onPlay"
               @pause="onPause"
+              @canplay="onCanPlay"
+              @loadeddata="onCanPlay"
               @timeupdate="onTimeUpdate"
               @ended="onEnded"
               @loadedmetadata="onLoadedMetadata"

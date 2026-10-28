@@ -62,12 +62,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: "红果短剧 macOS 原生桌面版 ${{ steps.version.outputs.tag }}"
+          name: "红果开放播放器 macOS 原生桌面版 ${{ steps.version.outputs.tag }}"
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            ### 🍎 红果短剧 macOS 原生桌面播放器 ${{ steps.version.outputs.tag }}
+            ### 🍎 红果开放播放器 macOS 原生桌面版 ${{ steps.version.outputs.tag }}
 
             本版本为专为 macOS 打造的原生桌面应用，开箱即用，无需打开任何网页浏览器。
 
@@ -79,9 +79,9 @@ jobs:
             - 💾 **观影进度记忆**：自动记录各剧集播放进度，支持剧目收藏与分类检索。
 
             #### 📥 下载安装方式：
-            - **Apple Silicon (M1/M2/M3/M4 芯片)**：下载 `红果短剧-*-arm64.dmg`，双击后将图标拖入 `Applications` 文件夹即可直接启动。
-            - **Intel 芯片**：下载 `红果短剧-*.dmg` (或包含 x64 字样)，双击拖入 `Applications` 即可。
-            - **绿色便携 ZIP**：也可直接下载 `*-mac.zip` 解压后直接运行 `红果短剧.app`。
+            - **Apple Silicon (M1/M2/M3/M4 芯片)**：下载 `红果开放播放器-*-arm64.dmg`，双击后将图标拖入 `Applications` 文件夹即可直接启动。
+            - **Intel 芯片**：下载 `红果开放播放器-*.dmg` (或包含 x64 字样)，双击拖入 `Applications` 即可。
+            - **绿色便携 ZIP**：也可直接下载 `*-mac.zip` 解压后直接运行 `红果开放播放器.app`。
           files: |
             dist-electron/*.dmg
             dist-electron/*.zip

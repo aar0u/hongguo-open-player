@@ -96,9 +96,11 @@ app.get('/api/play/:vid', async (req, res) => {
 app.get('/api/stream/:vid', (req, res) => {
   const { vid } = req.params;
   const { next_vid } = req.query;
-  // 如果客户端传入了下一集的 vid，后台执行无感预加载
+  // 延迟 4 秒执行下一集预加载，优先保障当前集起播带宽
   if (next_vid) {
-    streamService.prefetch(next_vid);
+    setTimeout(() => {
+      streamService.prefetch(next_vid);
+    }, 4000);
   }
   streamService.handleStream(req, res, vid);
 });
@@ -147,7 +149,7 @@ function startServer(preferredPort = PORT) {
     const server = app.listen(preferredPort, '127.0.0.1', () => {
       const actualPort = server.address().port;
       console.log(`====================================================`);
-      console.log(`🚀 红果短剧桌面播放器服务已启动!`);
+      console.log(`🚀 红果开放播放器服务已启动!`);
       console.log(`📍 本地访问地址: http://127.0.0.1:${actualPort}`);
       console.log(`🎬 具备 MP4 CENC 实时流式解密代理与全集无感预加载功能`);
       console.log(`====================================================`);
