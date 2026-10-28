@@ -70,8 +70,8 @@ jobs:
         run: |
           npm version "${{ needs.prep.outputs.raw_version }}" --no-git-tag-version --allow-same-version
 
-      - name: Run verification test
-        run: npm test
+      - name: Run offline regression tests
+        run: npm run test:unit
 
       - name: Build platform packages
         env:

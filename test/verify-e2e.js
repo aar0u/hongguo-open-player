@@ -162,7 +162,10 @@ async function runTests() {
     console.log('🎉 所有 7 项全流程测试全部成功通过！');
     console.log('======================================================\n');
   } catch (err) {
-    console.error('\n❌ 测试失败:', err);
+    console.error('\n❌ 测试失败:', err.response?.data?.error || err.message);
+    if (err.config?.url) {
+      console.error('请求路径:', new URL(err.config.url).pathname, 'HTTP:', err.response?.status || '无响应');
+    }
     process.exitCode = 1;
   } finally {
     if (serverInstance) {
