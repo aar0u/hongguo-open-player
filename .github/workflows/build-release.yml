@@ -2,6 +2,8 @@ name: Build & Release Native Apps
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -18,7 +20,7 @@ jobs:
       raw_version: ${{ steps.version.outputs.raw_version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -52,10 +54,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Setup Node.js (22.x)
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v4
         with:
           node-version: 22.x
           cache: 'npm'
@@ -77,7 +79,7 @@ jobs:
         run: ${{ matrix.build_cmd }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: artifacts-${{ matrix.platform }}
           path: |
@@ -90,15 +92,17 @@ jobs:
   release:
     name: Create or Update GitHub Release
     needs: [prep, build]
+    if: always() && !cancelled() && needs.prep.result == 'success'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           path: release-assets
+          pattern: artifacts-*
           merge-multiple: true
 
       - name: Compute SHA256 Checksums
@@ -109,7 +113,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prep.outputs.tag }}
           name: "红果开放播放器 多平台原生桌面版 ${{ needs.prep.outputs.tag }}"
