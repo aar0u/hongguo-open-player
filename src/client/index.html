@@ -118,6 +118,7 @@
           <!-- 视频播放核心区 -->
           <div class="video-stage">
             <video 
+              :key="currentStreamUrl"
               ref="videoEl"
               class="video-element"
               :src="currentStreamUrl"

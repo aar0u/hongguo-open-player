@@ -35,3 +35,42 @@ test('late catalog responses cannot replace the active tab; search pagination ke
 });
 
 module.exports = { client, response };
+
+test('switching series and episodes resets progress and canplay preserves a user pause', async () => {
+  const saved = [];
+  const series = id => ({ series_id: id, episodes: [{ vid: `${id}1`, vid_index: 1 }, { vid: `${id}2`, vid_index: 2 }] });
+  const state = client(async (url, options) => {
+    if (url === '/api/progress') { saved.push(JSON.parse(options.body)); return response({}); }
+    return response(series(url.split('/').pop()));
+  });
+  await state.openTheater({ series_id: '1' });
+  let plays = 0;
+  const video = { duration: 100, currentTime: 42, buffered: { length: 0 }, paused: true,
+    pause() {}, play() { plays++; return Promise.resolve(); } };
+  state.videoEl.value = video;
+  state.onLoadedMetadata();
+  state.onTimeUpdate();
+  state.switchEpisode({ vid_index: 2 });
+  assert.equal(saved[0].episode_index, 1);
+  assert.equal(saved[0].position_sec, 42);
+  state.onPause(); // metadata is not ready for the new episode
+  assert.equal(saved.length, 1);
+  assert.equal(state.duration.value, 0);
+  const before = plays;
+  state.onCanPlay();
+  assert.equal(plays, before);
+  await state.openTheater({ series_id: '2' });
+  assert.equal(state.currentTime.value, 0);
+  assert.equal(saved.length, 1);
+});
+
+test('a pending drama detail cannot reopen theater after navigating away', async () => {
+  let resolveDetail;
+  const state = client(url => url.startsWith('/api/series/')
+    ? new Promise(resolve => { resolveDetail = resolve; }) : Promise.resolve(response([])));
+  const opening = state.openTheater({ series_id: '1' });
+  state.switchTab('history');
+  resolveDetail(response({ series_id: '1', episodes: [{ vid: '1', vid_index: 1 }] }));
+  await opening;
+  assert.equal(state.viewMode.value, 'catalog');
+});
