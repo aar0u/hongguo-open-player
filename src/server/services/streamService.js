@@ -26,23 +26,24 @@ class StreamService {
       const probe = await axios.get(url, {
         headers: { ...headers, Range: 'bytes=0-0' },
         timeout: 4000,
+        responseType: 'arraybuffer',
         signal
       });
 
       const rangeHeader = probe.headers['content-range'];
       if (!rangeHeader) {
-        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
-        return Buffer.from(full.data);
+        if (probe.status === 200) return Buffer.from(probe.data);
+        throw new Error('Invalid range probe');
       }
 
       const total = parseInt(rangeHeader.split('/')[1], 10);
       if (isNaN(total) || total <= 0) {
-        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
-        return Buffer.from(full.data);
+        if (probe.status === 200) return Buffer.from(probe.data);
+        throw new Error('Invalid range probe');
       }
 
       // 并发 6~8 个连接分段下载
-      const concurrency = Math.min(8, Math.max(4, Math.ceil(total / (1024 * 1024))));
+      const concurrency = Math.min(total, 8, Math.max(4, Math.ceil(total / (1024 * 1024))));
       const chunkSize = Math.ceil(total / concurrency);
       const tasks = [];
 
@@ -55,7 +56,13 @@ class StreamService {
             headers: { ...headers, Range: `bytes=${start}-${end}` },
             timeout: timeoutMs,
             signal
-          }).then(r => Buffer.from(r.data))
+          }).then(r => {
+            const chunk = Buffer.from(r.data);
+            if (r.status !== 206 || r.headers['content-range'] !== `bytes ${start}-${end}/${total}` || chunk.length !== end - start + 1) {
+              throw new Error('Invalid media range response');
+            }
+            return chunk;
+          })
         );
       }
 
