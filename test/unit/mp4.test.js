@@ -53,3 +53,10 @@ test('native CTR decrypts complete and partial AES blocks including binary data'
     assert.deepEqual(output.subarray(output.indexOf(Buffer.from('mdat')) + 4), plain);
   }
 });
+
+test('unsupported subsample and 16-byte IV CENC layouts fail explicitly', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  for (const [nonce, flags] of [[Buffer.alloc(8), 2], [Buffer.alloc(16), 0]]) {
+    assert.throws(() => decryptMp4Buffer(encryptedMp4(Buffer.alloc(32), Buffer.alloc(16), nonce, flags), Buffer.alloc(16)), /Unsupported CENC/);
+  }
+});

@@ -994,13 +994,14 @@ function decryptMp4Buffer(data, key) {
   const trackInfo = [];
   for (const stbl of stbls) {
     const stsz = getBox(stbl.children, 'stsz');
-    const stco = getBox(stbl.children, 'stco');
+    const stco = getBox(stbl.children, 'stco') || getBox(stbl.children, 'co64');
     const stsc = getBox(stbl.children, 'stsc');
     const senc = getBox(stbl.children, 'senc');
     if (!stsz || !stco || !stsc) continue;
 
     const ss = data.readUInt32BE(stsz.off + 12);
     const n = data.readUInt32BE(stsz.off + 16);
+    if (n > 1000000 || (ss === 0 && 20 + n * 4 > stsz.size)) throw new Error('Invalid MP4 sample sizes');
     let sizes = [];
     if (ss === 0) {
       for (let i = 0; i < n; i++) {
@@ -1011,12 +1012,18 @@ function decryptMp4Buffer(data, key) {
     }
 
     const nc = data.readUInt32BE(stco.off + 12);
+    const chunkStride = stco.typ === 'co64' ? 8 : 4;
+    if (16 + nc * chunkStride > stco.size) throw new Error('Invalid MP4 chunk offsets');
     const chunkOffs = [];
     for (let i = 0; i < nc; i++) {
-      chunkOffs.push(data.readUInt32BE(stco.off + 16 + i * 4));
+      const position = stco.off + 16 + i * chunkStride;
+      const offset = chunkStride === 8 ? Number(data.readBigUInt64BE(position)) : data.readUInt32BE(position);
+      if (!Number.isSafeInteger(offset)) throw new Error('Unsafe MP4 chunk offset');
+      chunkOffs.push(offset);
     }
 
     const ns = data.readUInt32BE(stsc.off + 12);
+    if (16 + ns * 12 > stsc.size) throw new Error('Invalid MP4 sample-to-chunk table');
     const stscTab = [];
     for (let i = 0; i < ns; i++) {
       stscTab.push([
@@ -1029,11 +1036,15 @@ function decryptMp4Buffer(data, key) {
     const ivs = [];
     if (senc) {
       const sc = data.readUInt32BE(senc.off + 12);
+      if (data.readUInt32BE(senc.off + 8) !== 0 || sc !== n || senc.size !== 16 + sc * 8) {
+        throw new Error('Unsupported CENC encryption layout (requires full samples and 8-byte IVs)');
+      }
       for (let i = 0; i < sc; i++) {
         ivs.push(data.subarray(senc.off + 16 + i * 8, senc.off + 24 + i * 8));
       }
     }
 
+    if (!senc && stbl.children.some(box => ['saio', 'saiz'].includes(box.typ))) throw new Error('Unsupported external CENC auxiliary data');
     const chunkSpc = {};
     for (let i = 0; i < stscTab.length; i++) {
       const fc = stscTab[i][0];
@@ -1064,7 +1075,7 @@ function decryptMp4Buffer(data, key) {
     for (let i = 0; i < ti.offs.length; i++) {
       const off = ti.offs[i];
       const sz = ti.sizes[i];
-      if (off + sz > total) continue;
+      if (off + sz > total) throw new Error('MP4 sample exceeds file bounds');
       if (i < ti.ivs.length) {
         const nonce = ti.ivs[i].subarray(0, 8);
         const cipher = data.subarray(off, off + sz);
