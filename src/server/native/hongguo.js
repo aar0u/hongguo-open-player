@@ -977,6 +977,7 @@ function mp4TrackInfo(data, top, total) {
   if (top.some(box => box.typ === 'moof')) throw new Error('Fragmented MP4 is not supported');
   const stbls = Array.from(walkBoxes(top)).filter(b => b.typ === 'stbl');
   const trackInfo = [];
+  let sampleBudget = 0;
   for (const stbl of stbls) {
     const stsz = getBox(stbl.children, 'stsz');
     const stco = getBox(stbl.children, 'stco') || getBox(stbl.children, 'co64');
@@ -1001,6 +1002,8 @@ function mp4TrackInfo(data, top, total) {
 
     const ss = data.readUInt32BE(stsz.off + 12);
     const n = data.readUInt32BE(stsz.off + 16);
+    sampleBudget += n;
+    if (sampleBudget > 100000) throw new Error('MP4 sample count exceeds budget');
     if (n > 100000 || (ss === 0 && 20 + n * 4 > stsz.size)) throw new Error('Invalid MP4 sample sizes');
     let sizes = [];
     if (ss === 0) {

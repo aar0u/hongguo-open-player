@@ -4,20 +4,20 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-test('desktop recreates windows with one server and registers show before loading', async () => {
+for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and packaged window options on ${platform}`, async () => {
   const app = new EventEmitter();
   Object.assign(app, { commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true,
     whenReady: () => Promise.resolve(), getPath: () => '/tmp/player-user', quit() {} });
   const windows = [];
   class Window extends EventEmitter {
     static getAllWindows() { return windows.filter(w => !w.closed); }
-    constructor() { super(); this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = handler => { this.open = handler; }; windows.push(this); }
+    constructor(options) { super(); this.options = options; this.webContents = new EventEmitter(); this.webContents.setWindowOpenHandler = handler => { this.open = handler; }; windows.push(this); }
     async loadURL() { this.emit('ready-to-show'); }
     show() { this.shown = true; }
     focus() {}
   }
   let starts = 0;
-  const context = { console, process: { platform: 'darwin', env: {} }, __dirname: '/repo/src/electron',
+  const context = { console, process: { platform, env: {} }, __dirname: '/repo/src/electron',
     require(name) {
       if (name === 'electron') return { app, BrowserWindow: Window, Menu: { buildFromTemplate() {}, setApplicationMenu() {} }, shell: { openExternal: async () => {} } };
       if (name === '../server/index.js') return { startServer: async () => { starts++; return { server: { close() {} }, port: 8899 }; } };
@@ -26,6 +26,11 @@ test('desktop recreates windows with one server and registers show before loadin
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(windows[0].shown, true);
+  if (platform === 'win32') {
+    assert.equal(windows[0].options.titleBarStyle, 'hidden');
+    assert.equal(windows[0].options.titleBarOverlay.height, 40);
+    assert.ok(require('../../package.json').build.files.includes('build/icon.ico'));
+  }
   windows[0].closed = true;
   windows[0].emit('closed');
   app.emit('activate');
