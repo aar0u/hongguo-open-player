@@ -2,6 +2,7 @@
 const axios = require('axios');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
+const { normalizeDownloadQuality } = require('../native/download-quality');
 const { webMediaRequestOptions } = require('../native/web-media-guard');
 
 class StreamService {
@@ -14,6 +15,9 @@ class StreamService {
     // 正在下载解密中的 Promise 映射，避免并发 Range 请求重复下载
     this.inFlight = new Map();
     this.prefetchTimers = new Map();
+    this.queue = [];
+    this.activeJob = null;
+    this.maxPending = 8;
   }
 
   /**
@@ -93,7 +97,7 @@ class StreamService {
   /**
    * 智能下载：排序边缘 CDN 节点并支持 1.5s 备用节点竞速，解决个别主域名 (如 v9-reading-video) 限速 30 秒卡顿问题
    */
-  async downloadFastestMedia(variants, defaultVariant, timeoutMs = 25000) {
+  async downloadFastestMedia(variants, defaultVariant, timeoutMs = 25000, signal) {
     const list = Array.isArray(variants) && variants.length > 0 ? variants : [defaultVariant];
     // 智能排序：优先排除受限速的主节点，优先选择边缘高速 CDN
     const sorted = [...list].sort((a, b) => {
@@ -106,9 +110,10 @@ class StreamService {
 
     const fetchOne = async (variant, index) => {
       const controller = abortControllers[index];
+      const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
       const host = new URL(variant.url).hostname;
       const t0 = Date.now();
-      const buffer = await this.downloadWithParallelRanges(variant.url, variant.userAgent, timeoutMs, controller.signal);
+      const buffer = await this.downloadWithParallelRanges(variant.url, variant.userAgent, timeoutMs, combined);
       console.log(`[StreamService] ⚡ 并发分片加速从 [${host}] 下载完毕: ${buffer.length} 字节，耗时 ${Date.now() - t0}ms`);
       return { buffer, variant };
     };
@@ -121,9 +126,12 @@ class StreamService {
       let settled = false;
       let next = 0;
       let failures = 0;
+      let running = 0;
       let timer;
       const launch = () => {
-        if (settled || next >= sorted.length) return;
+        if (settled || next >= sorted.length || running >= 2) return;
+        if (signal?.aborted) { settled = true; clearTimeout(timer); reject(signal.reason); return; }
+        running++;
         const index = next++;
         clearTimeout(timer);
         if (next < sorted.length) timer = setTimeout(launch, 1200);
@@ -136,6 +144,7 @@ class StreamService {
         }).catch(error => {
           if (settled) return;
           failures++;
+          running--;
           if (failures === sorted.length) {
             settled = true;
             clearTimeout(timer);
@@ -153,56 +162,82 @@ class StreamService {
   /**
    * 获取或解密得到指定 vid 的明文 MP4 Buffer
    */
-  async getDecryptedBuffer(vid, quality = 'auto') {
-    const videoId = String(vid);
-    const key = `${videoId}:${quality}`;
-    // 1. 命中内存缓存
+  getDecryptedBuffer(vid, quality = 'auto', { signal, background = false } = {}) {
+    quality = normalizeDownloadQuality(quality);
+    const key = `${vid}:${quality}`;
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.cache.has(key)) {
       const entry = this.cache.get(key);
-      entry.timestamp = Date.now();
-      return entry.buffer;
+      this.cache.delete(key);
+      this.cache.set(key, entry);
+      return Promise.resolve(entry.buffer);
     }
+    let job = this.inFlight.get(key);
+    if (job?.controller.signal.aborted) { this.inFlight.delete(key); job = null; }
+    if (!job) {
+      if (this.inFlight.size >= this.maxPending) return Promise.reject(Object.assign(new Error('播放请求过多，请稍后重试'), { status: 503 }));
+      job = { key, vid: String(vid), quality, background, controller: new AbortController(), clients: new Set() };
+      job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
+      this.inFlight.set(key, job);
+      this.queue.push(job);
+    } else if (!background) job.background = false;
+    const client = Symbol();
+    job.clients.add(client);
+    if (!background && this.activeJob?.background && this.activeJob !== job) this.activeJob.controller.abort(new Error('Prefetch superseded'));
+    queueMicrotask(() => this.runNext());
+    return new Promise((resolve, reject) => {
+      const release = () => {
+        signal?.removeEventListener('abort', cancel);
+        job.clients.delete(client);
+      };
+      const cancel = () => {
+        release();
+        if (!job.clients.size) job.controller.abort(signal.reason);
+        reject(signal.reason);
+      };
+      signal?.addEventListener('abort', cancel, { once: true });
+      job.promise.then(value => { release(); resolve(value); }, error => { release(); reject(error); });
+    });
+  }
 
-    // 2. 避免并发请求重叠下载
-    if (this.inFlight.has(key)) {
-      return await this.inFlight.get(key);
+  runNext() {
+    if (this.activeJob) return;
+    this.queue.sort((a, b) => Number(a.background) - Number(b.background));
+    const job = this.queue.shift();
+    if (!job) return;
+    if (job.controller.signal.aborted) {
+      if (this.inFlight.get(job.key) === job) this.inFlight.delete(job.key);
+      job.reject(job.controller.signal.reason);
+      this.runNext();
+      return;
     }
+    this.activeJob = job;
+    this.loadBuffer(job.vid, job.quality, job.controller.signal).then(job.resolve, job.reject).finally(() => {
+      if (this.inFlight.get(job.key) === job) this.inFlight.delete(job.key);
+      this.activeJob = null;
+      this.runNext();
+    });
+  }
 
-    const task = (async () => {
-      try {
-        console.log(`[StreamService] 正在解析视频播放地址 vid: ${key}`);
-        const playInfo = await appSource.fetchAppPlayUrl(videoId, { quality, allowLowerQuality: true });
-        if (!playInfo || !playInfo.url) {
-          throw new Error('未获取到有效的视频流链接');
-        }
+  async loadBuffer(vid, quality, signal) {
+    const playInfo = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
+    signal.throwIfAborted();
+    if (!playInfo?.url) throw new Error('未获取到有效的视频流链接');
+    const { buffer, variant } = await this.downloadFastestMedia(playInfo.variants, playInfo, 25000, signal);
+    signal.throwIfAborted();
+    const contentKey = variant.contentKey || playInfo.contentKey;
+    const key = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(contentKey || '', 'hex');
+    const decrypted = decryptMp4Buffer(buffer, key);
+    this.cache.set(`${vid}:${quality}`, { buffer: decrypted, size: decrypted.length });
+    this.pruneCache();
+    return decrypted;
+  }
 
-        console.log(`[StreamService] 正在多源极速拉取媒体流 (${playInfo.codec}, ${playInfo.quality})...`);
-        const { buffer: encryptedBuf, variant: chosenVariant } = await this.downloadFastestMedia(playInfo.variants, playInfo);
-
-        console.log(`[StreamService] 正在解密 MP4 CENC 样本 (${encryptedBuf.length} bytes)...`);
-
-        // 密钥派生与解密
-        const contentKey = chosenVariant.contentKey || playInfo.contentKey;
-        const keyBuf = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(String(contentKey), 'hex');
-        const decryptedBuf = decryptMp4Buffer(encryptedBuf, keyBuf);
-        console.log(`[StreamService] 解密完成 (${decryptedBuf.length} bytes)，已写入流式缓存`);
-
-        // 存入 LRU 缓存
-        this.cache.set(key, {
-          buffer: decryptedBuf,
-          size: decryptedBuf.length,
-          timestamp: Date.now()
-        });
-        this.pruneCache();
-
-        return decryptedBuf;
-      } finally {
-        this.inFlight.delete(key);
-      }
-    })();
-
-    this.inFlight.set(key, task);
-    return await task;
+  shutdown() {
+    for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
+    this.prefetchTimers.clear();
+    for (const job of this.inFlight.values()) job.controller.abort(new Error('Player stopped'));
+    this.cache.clear();
   }
 
   /**
@@ -220,7 +255,8 @@ class StreamService {
     }
     const timer = setTimeout(() => {
       this.prefetchTimers.delete(key);
-      this.getDecryptedBuffer(vid, quality).catch(err => {
+      if (this.activeJob && !this.activeJob.background) return;
+      this.getDecryptedBuffer(vid, quality, { background: true }).catch(err => {
         console.warn(`[StreamService] 预加载分集 ${vid} 失败:`, err.message);
       });
     }, 4000);
@@ -234,19 +270,9 @@ class StreamService {
   pruneCache() {
     let bytes = [...this.cache.values()].reduce((sum, entry) => sum + entry.size, 0);
     while (this.cache.size > this.maxCacheCount || bytes > this.maxCacheBytes) {
-      let oldestKey = null;
-      let oldestTime = Infinity;
-      for (const [k, v] of this.cache.entries()) {
-        if (v.timestamp < oldestTime) {
-          oldestTime = v.timestamp;
-          oldestKey = k;
-        }
-      }
-      if (oldestKey) {
-        console.log(`[StreamService] LRU 释放旧分集缓存: ${oldestKey}`);
-        bytes -= this.cache.get(oldestKey).size;
-        this.cache.delete(oldestKey);
-      } else break;
+      const oldestKey = this.cache.keys().next().value;
+      bytes -= this.cache.get(oldestKey).size;
+      this.cache.delete(oldestKey);
     }
   }
 
@@ -255,8 +281,17 @@ class StreamService {
    */
   async handleStream(req, res, vid) {
     try {
-      const buffer = await this.getDecryptedBuffer(vid);
-      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid);
+      const controller = new AbortController();
+      const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
+      res.once?.('close', disconnected);
+      let buffer;
+      try {
+        buffer = await this.getDecryptedBuffer(vid, req.query?.quality || 'auto', { signal: controller.signal });
+      } finally {
+        res.removeListener?.('close', disconnected);
+      }
+      if (res.destroyed) return;
+      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid, req.query?.quality || 'auto');
       const total = buffer.length;
       const range = req.headers.range;
 
@@ -306,8 +341,9 @@ class StreamService {
       res.end(buffer.subarray(start, end + 1));
     } catch (err) {
       console.error(`[StreamService] 播放流服务异常 vid: ${vid}`, err);
+      if (res.destroyed) return;
       if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.writeHead(err.status || 500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
       }
     }

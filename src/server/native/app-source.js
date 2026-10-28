@@ -308,7 +308,8 @@ async function fetchAppPlayUrl(vid, options = {}) {
     vid = String(vid || '');
     if (!/^\d{1,30}$/.test(vid)) throw new Error('分集编号无效');
     const deadline = Date.now() + 12000;
-    const signal = AbortSignal.timeout(12000);
+    const timeoutSignal = AbortSignal.timeout(12000);
+    const signal = options.signal ? AbortSignal.any([timeoutSignal, options.signal]) : timeoutSignal;
     const payload = JSON.stringify({
         biz_param: { detail_page_version: 0, device_level: 3, disable_digg_stat: false, need_all_video_definition: true, need_mp4_align: false, use_os_player: false, use_server_dns: false, video_platform: 1024 },
         mixed_video_id_map: { '1004': [vid] },
