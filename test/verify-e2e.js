@@ -173,8 +173,10 @@ async function runTests() {
   } finally {
     if (serverInstance) {
       serverInstance.close();
+      serverInstance.closeAllConnections?.();
     }
     fs.rmSync(testDataDir, { recursive: true, force: true });
+    process.exit(process.exitCode || 0);
   }
 }
 
