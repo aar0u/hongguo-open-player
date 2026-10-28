@@ -6,17 +6,29 @@ const hgCatalog = require('../native/hongguo-app-catalog');
 const appSource = require('../native/app-source');
 
 class DramaService {
+  constructor() {
+    this.searchSessions = new Map();
+  }
+
   /**
    * 搜索短剧
    */
   async search(keyword, page = 1) {
-    if (!keyword || !keyword.trim()) {
+    if (keyword === undefined || keyword === '') {
       return { results: [], total: 0, page: 1, hasMore: false };
     }
+    if (typeof keyword !== 'string' || keyword.trim().length > 80) {
+      throw Object.assign(new Error('搜索词需为 1 至 80 字的文本'), { status: 400 });
+    }
+    page = Number(page);
+    if (!Number.isInteger(page) || page < 1 || page > 50) {
+      throw Object.assign(new Error('页码需为 1 至 50 的整数'), { status: 400 });
+    }
     const cleanKw = keyword.trim();
+    if (!cleanKw) return { results: [], total: 0, page, hasMore: false };
     try {
-      const res = await hgSearch.searchHongguo(cleanKw, page);
-      if (res && Array.isArray(res.results) && res.results.length > 0) {
+      const res = await hgSearch.searchHongguo(cleanKw, { page });
+      if (res && Array.isArray(res.results) && res.success !== false) {
         return res;
       }
     } catch (e) {
@@ -25,7 +37,15 @@ class DramaService {
 
     // 回退到 App 端搜索
     try {
-      const appRes = await hgAppSearch.searchApp(cleanKw, page);
+      let session = this.searchSessions.get(cleanKw);
+      if (page === 1 || !session || session.expires <= Date.now()) {
+        session = { expires: Date.now() + 120000, cursors: new Map() };
+        this.searchSessions.delete(cleanKw);
+        this.searchSessions.set(cleanKw, session);
+        if (this.searchSessions.size > 30) this.searchSessions.delete(this.searchSessions.keys().next().value);
+      }
+      const appRes = await hgAppSearch.searchApp(cleanKw, { page, cursor: session.cursors.get(page) });
+      if (appRes?.hasMore && appRes.cursor) session.cursors.set(page + 1, appRes.cursor);
       return appRes || { results: [], total: 0, page: 1, hasMore: false };
     } catch (e) {
       console.error('[DramaService] App search failed:', e.message);
