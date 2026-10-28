@@ -4,6 +4,7 @@ const StreamService = require('../../src/server/services/streamService').constru
 
 test('HTTP ranges support suffix/open end and reject malformed or unsafe offsets', async () => {
   const service = new StreamService();
+  service.getStreamingPlan = async () => null;
   service.getDecryptedBuffer = async () => Buffer.from('0123456789');
   for (const [range, status, data] of [
     ['bytes=2-4', 206, '234'], ['bytes=7-', 206, '789'], ['bytes=-3', 206, '789'],

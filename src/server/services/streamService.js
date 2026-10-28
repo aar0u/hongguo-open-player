@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const axios = require('axios');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
+const { prepareRangeMedia } = require('./rangeMedia');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
 const { normalizeDownloadQuality } = require('../native/download-quality');
@@ -18,6 +21,9 @@ class StreamService {
     this.queue = [];
     this.activeJob = null;
     this.maxPending = 8;
+    this.plans = new Map();
+    this.activeStreams = 0;
+    this.streamControllers = new Set();
   }
 
   /**
@@ -237,15 +243,19 @@ class StreamService {
     for (const timer of this.prefetchTimers.values()) clearTimeout(timer);
     this.prefetchTimers.clear();
     for (const job of this.inFlight.values()) job.controller.abort(new Error('Player stopped'));
+    this.planPrefetch?.abort();
+    for (const controller of this.streamControllers) controller.abort(new Error('Player stopped'));
     this.cache.clear();
+    this.plans.clear();
   }
 
   /**
    * 预加载下一集 (Prefetch)
    */
-  prefetch(vid, quality = 'auto') {
+  prefetch(vid, quality = 'auto', metadataOnly = false) {
     if (!vid || !/^\d{1,30}$/.test(String(vid))) return;
     const key = `${vid}:${quality}`;
+    if (metadataOnly && this.plans.get(key)?.expires > Date.now()) return;
     if (this.cache.has(key) || this.inFlight.has(key) || this.prefetchTimers.has(key)) return;
     // Range and HEAD probes must not create a timer for every browser request.
     if (this.prefetchTimers.size >= 2) {
@@ -255,7 +265,15 @@ class StreamService {
     }
     const timer = setTimeout(() => {
       this.prefetchTimers.delete(key);
-      if (this.activeJob && !this.activeJob.background) return;
+      if (this.activeStreams || (this.activeJob && !this.activeJob.background)) return;
+      if (metadataOnly) {
+        const controller = new AbortController();
+        this.planPrefetch = controller;
+        this.getStreamingPlan(String(vid), quality, controller.signal).catch(error => {
+          if (!controller.signal.aborted) console.warn('Metadata prefetch failed:', error.message);
+        }).finally(() => { if (this.planPrefetch === controller) this.planPrefetch = null; });
+        return;
+      }
       this.getDecryptedBuffer(vid, quality, { background: true }).catch(err => {
         console.warn(`[StreamService] 预加载分集 ${vid} 失败:`, err.message);
       });
@@ -279,7 +297,76 @@ class StreamService {
   /**
    * 处理 HTTP Range 播放请求 (边下边解边播的核心接口)
    */
+  async getStreamingPlan(vid, quality, signal) {
+    const key = `${vid}:${quality}`;
+    const cached = this.plans.get(key);
+    if (cached?.expires > Date.now()) return cached.plan;
+    const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
+    let lastError;
+    for (const variant of info.variants?.length ? info.variants : [info]) {
+      signal.throwIfAborted();
+      try {
+        const plan = await prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
+        this.plans.set(key, { plan, expires: Date.now() + 90000 });
+        if (this.plans.size > 8) this.plans.delete(this.plans.keys().next().value);
+        return plan;
+      } catch (error) {
+        if (error.code === 'RANGE_UNSUPPORTED') return null;
+        lastError = error;
+      }
+    }
+    throw lastError || new Error('视频源不可用');
+  }
+
   async handleStream(req, res, vid) {
+    if (this.activeStreams >= 3) { res.writeHead(503); res.end(); return; }
+    this.activeStreams++;
+    this.planPrefetch?.abort();
+    const controller = new AbortController();
+    this.streamControllers.add(controller);
+    const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
+    res.once?.('close', disconnected);
+    try {
+      const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
+      const plan = await this.getStreamingPlan(vid, quality, controller.signal);
+      if (!plan) return await this.handleBufferedStream(req, res, vid);
+      const total = plan.size;
+      let start = 0, end = total - 1;
+      if (req.headers.range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+        if (!match || (!match[1] && !match[2])) { res.writeHead(416, { 'Content-Range': `bytes */${total}` }); res.end(); return; }
+        if (!match[1]) {
+          const suffix = Number(match[2]);
+          start = Number.isSafeInteger(suffix) && suffix > 0 ? Math.max(0, total - suffix) : NaN;
+        } else { start = Number(match[1]); end = match[2] ? Number(match[2]) : total - 1; }
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= total) {
+          res.writeHead(416, { 'Content-Range': `bytes */${total}` }); res.end(); return;
+        }
+        end = Math.min(end, total - 1);
+      }
+      if (res.destroyed) return;
+      res.writeHead(req.headers.range ? 206 : 200, {
+        'Content-Type': 'video/mp4', 'Content-Length': end - start + 1,
+        'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-store',
+        ...(req.headers.range ? { 'Content-Range': `bytes ${start}-${end}/${total}` } : {})
+      });
+      if (req.method === 'HEAD') { res.end(); return; }
+      await pipeline(Readable.from(plan.read(start, end, controller.signal)), res);
+      this.prefetch(req.query?.next_vid, quality, true);
+    } catch (error) {
+      this.plans.delete(`${vid}:${req.query?.quality || 'auto'}`);
+      if (!res.destroyed) {
+        if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '视频源加载失败，请稍后重试' })); }
+        else res.destroy(error);
+      }
+    } finally {
+      res.removeListener?.('close', disconnected);
+      this.activeStreams--;
+      this.streamControllers.delete(controller);
+    }
+  }
+
+  async handleBufferedStream(req, res, vid) {
     try {
       const controller = new AbortController();
       const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
@@ -301,7 +388,7 @@ class StreamService {
           'Content-Length': total,
           'Content-Type': 'video/mp4',
           'Accept-Ranges': 'bytes',
-          'Cache-Control': 'public, max-age=3600'
+          'Cache-Control': 'private, no-store'
         });
         if (req.method === 'HEAD') return res.end();
         return res.end(buffer);
@@ -334,7 +421,7 @@ class StreamService {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': 'video/mp4',
-        'Cache-Control': 'public, max-age=3600'
+        'Cache-Control': 'private, no-store'
       });
 
       if (req.method === 'HEAD') return res.end();

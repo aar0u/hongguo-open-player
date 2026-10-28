@@ -838,7 +838,7 @@ function parseBoxes(data, start, end, depth = 0) {
 /**
  * 重建 moov box
  */
-function rebuildMoov(data, moovOff, moovSize, top, order = top) {
+function rebuildMoov(data, moovOff, moovSize, top, order = top, relocate) {
   const moovBox = top.find(b => b.typ === 'moov');
   if (!moovBox) throw new Error('no moov box');
 
@@ -954,6 +954,12 @@ function rebuildMoov(data, moovOff, moovSize, top, order = top) {
       for (let i = 0; i < count; i++) {
         const position = b.off + b.hdr + 8 + i * stride;
         const old = stride === 8 ? Number(data.readBigUInt64BE(position)) : data.readUInt32BE(position);
+        if (relocate) {
+          const updated = relocate(old, first.length);
+          if (stride === 8) data.writeBigUInt64BE(BigInt(updated), position);
+          else data.writeUInt32BE(updated, position);
+          continue;
+        }
         const source = top.find(box => old >= box.off && old < box.off + box.size);
         if (!Number.isSafeInteger(old) || !source) throw new Error('Invalid MP4 chunk offset');
         const updated = old + destinations.get(source.off) - source.off;
@@ -966,30 +972,11 @@ function rebuildMoov(data, moovOff, moovSize, top, order = top) {
   return serialize(tree);
 }
 
-/**
- * 解密 CENC-AES-CTR 加密的 MP4（内存版）
- * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
- * 注意：会就地修改传入的 Buffer（调用方应独占它）。
- */
-function decryptMp4Buffer(data, key) {
-  const total = data.length;
-  const top = parseBoxes(data, 0, total);
-  const moov = top.find(b => b.typ === 'moov');
-  if (!moov) throw new Error('no moov box found in MP4');
-
-  function getBox(boxes, typ) {
-    return (boxes || []).find(b => b.typ === typ);
-  }
-
+function mp4TrackInfo(data, top, total) {
+  const getBox = (boxes, type) => (boxes || []).find(box => box.typ === type);
   function* walkBoxes(boxes) {
-    for (const b of boxes) {
-      if (b.children) {
-        for (const x of walkBoxes(b.children)) yield x;
-      }
-      yield b;
-    }
+    for (const box of boxes) { if (box.children) yield* walkBoxes(box.children); yield box; }
   }
-
   const stbls = Array.from(walkBoxes(top)).filter(b => b.typ === 'stbl');
   const trackInfo = [];
   for (const stbl of stbls) {
@@ -1071,6 +1058,35 @@ function decryptMp4Buffer(data, key) {
     trackInfo.push({ sizes, offs: sampleOffs, ivs, stco });
   }
 
+  return trackInfo;
+}
+
+/**
+ * 解密 CENC-AES-CTR 加密的 MP4（内存版）
+ * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
+ * 注意：会就地修改传入的 Buffer（调用方应独占它）。
+ */
+function decryptMp4Buffer(data, key) {
+  const total = data.length;
+  const top = parseBoxes(data, 0, total);
+  const moov = top.find(b => b.typ === 'moov');
+  if (!moov) throw new Error('no moov box found in MP4');
+
+  function getBox(boxes, typ) {
+    return (boxes || []).find(b => b.typ === typ);
+  }
+
+  function* walkBoxes(boxes) {
+    for (const b of boxes) {
+      if (b.children) {
+        for (const x of walkBoxes(b.children)) yield x;
+      }
+      yield b;
+    }
+  }
+
+  const trackInfo = mp4TrackInfo(data, top, total);
+
   for (const ti of trackInfo) {
     for (let i = 0; i < ti.offs.length; i++) {
       const off = ti.offs[i];
@@ -1098,6 +1114,37 @@ function decryptMp4Buffer(data, key) {
   return Buffer.concat(out);
 }
 
+function createMp4StreamingPlan(metadata, boxes, total) {
+  const localBoxes = parseBoxes(metadata, 0, metadata.length);
+  const moov = boxes.find(box => box.typ === 'moov');
+  const order = boxes.filter(box => box !== moov);
+  const firstMedia = order.findIndex(box => box.typ === 'mdat');
+  if (!moov || firstMedia < 0) throw new Error('MP4 requires moov and mdat');
+  order.splice(firstMedia, 0, moov);
+  const tracks = mp4TrackInfo(metadata, localBoxes, total);
+  const relocate = (offset, moovSize) => {
+    if (!Number.isSafeInteger(offset)) throw new Error('Unsafe MP4 offset');
+    let destination = 0;
+    for (const box of order) {
+      if (box.typ !== 'moov' && offset >= box.off && offset < box.off + box.size) return destination + offset - box.off;
+      destination += box.typ === 'moov' ? moovSize : box.size;
+    }
+    throw new Error('MP4 offset outside media');
+  };
+  const rebuilt = rebuildMoov(metadata, 0, metadata.length, localBoxes, localBoxes, relocate);
+  let size = 0;
+  const segments = order.map(box => {
+    const segment = { start: size, size: box.typ === 'moov' ? rebuilt.length : box.size,
+      ...(box.typ === 'moov' ? { buffer: rebuilt } : { remote: box.off }) };
+    size += segment.size;
+    return segment;
+  });
+  const samples = tracks.flatMap(track => track.ivs.map((iv, index) => ({ offset: track.offs[index], size: track.sizes[index], iv })))
+    .sort((a, b) => a.offset - b.offset);
+  for (const sample of samples) if (!Number.isSafeInteger(sample.offset) || sample.offset + sample.size > total) throw new Error('Invalid encrypted MP4 sample');
+  return { size, segments, samples };
+}
+
 /**
  * 解密 MP4 文件并保存
  */
@@ -1116,6 +1163,7 @@ module.exports = {
   deriveKey,
   decryptMp4File,
   decryptMp4Buffer,
+  createMp4StreamingPlan,
   VIDEO_REFERER,
   UA,
   WEB_UA,
