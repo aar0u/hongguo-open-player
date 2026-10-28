@@ -838,7 +838,7 @@ function parseBoxes(data, start, end, depth = 0) {
 /**
  * 重建 moov box
  */
-function rebuildMoov(data, moovOff, moovSize, top) {
+function rebuildMoov(data, moovOff, moovSize, top, order = top) {
   const moovBox = top.find(b => b.typ === 'moov');
   if (!moovBox) throw new Error('no moov box');
 
@@ -940,16 +940,25 @@ function rebuildMoov(data, moovOff, moovSize, top) {
   }
 
   const first = serialize(tree);
-  const delta = moovSize - first.length;
-
+  const destinations = new Map();
+  let destination = 0;
+  for (const box of order) {
+    destinations.set(box.off, destination);
+    destination += box.typ === 'moov' ? first.length : box.size;
+  }
   for (const b of walkChildren(tree)) {
-    if (b.typ === 'stco') {
-      const nc = data.readUInt32BE(b.off + 12);
-      for (let i = 0; i < nc; i++) {
-        const v = data.readUInt32BE(b.off + 16 + i * 4);
-        if (v >= moovOff + moovSize) {
-          data.writeUInt32BE(v - delta, b.off + 16 + i * 4);
-        }
+    if (b.typ === 'stco' || b.typ === 'co64') {
+      const count = data.readUInt32BE(b.off + b.hdr + 4);
+      const stride = b.typ === 'co64' ? 8 : 4;
+      if (b.hdr + 8 + count * stride > b.size) throw new Error('Invalid MP4 chunk table');
+      for (let i = 0; i < count; i++) {
+        const position = b.off + b.hdr + 8 + i * stride;
+        const old = stride === 8 ? Number(data.readBigUInt64BE(position)) : data.readUInt32BE(position);
+        const source = top.find(box => old >= box.off && old < box.off + box.size);
+        if (!Number.isSafeInteger(old) || !source) throw new Error('Invalid MP4 chunk offset');
+        const updated = old + destinations.get(source.off) - source.off;
+        if (stride === 8) data.writeBigUInt64BE(BigInt(updated), position);
+        else data.writeUInt32BE(updated, position);
       }
     }
   }
@@ -1065,8 +1074,14 @@ function decryptMp4Buffer(data, key) {
     }
   }
 
-  const newMoov = rebuildMoov(data, moov.off, moov.size, top);
-  const out = top.map(box => box.typ === 'moov'
+  const order = [...top];
+  const firstMedia = order.findIndex(box => box.typ === 'mdat');
+  if (firstMedia >= 0 && order.indexOf(moov) > firstMedia) {
+    order.splice(order.indexOf(moov), 1);
+    order.splice(firstMedia, 0, moov);
+  }
+  const newMoov = rebuildMoov(data, moov.off, moov.size, top, order);
+  const out = order.map(box => box.typ === 'moov'
     ? newMoov : data.subarray(box.off, box.off + box.size));
 
   return Buffer.concat(out);
