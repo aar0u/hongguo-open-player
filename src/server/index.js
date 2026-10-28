@@ -102,10 +102,10 @@ app.get('/api/history', (req, res) => {
   res.json(storeService.getHistory());
 });
 
-app.post('/api/progress', (req, res) => {
+app.post('/api/progress', async (req, res) => {
   try {
     const item = req.body;
-    const updated = storeService.updateProgress(item);
+    const updated = await storeService.updateProgress(item);
     res.json({ success: true, progress: updated });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
@@ -119,9 +119,9 @@ app.get('/api/favorites', (req, res) => {
   res.json(storeService.getFavorites());
 });
 
-app.post('/api/favorites/toggle', (req, res) => {
+app.post('/api/favorites/toggle', async (req, res) => {
   try {
-    const isFav = storeService.toggleFavorite(req.body);
+    const isFav = await storeService.toggleFavorite(req.body);
     res.json({ success: true, is_favorite: isFav });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

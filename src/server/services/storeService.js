@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 
 class StoreService {
   constructor(dataDir = process.env.HONGGUO_DATA_DIR || path.join(__dirname, '../../../data')) {
@@ -10,41 +11,60 @@ class StoreService {
       history: Object.create(null), // series_id -> { series_id, series_title, cover, episode_index, vid, position_sec, duration_sec, updated_at }
       favorites: Object.create(null) // series_id -> { series_id, series_title, cover, updated_at }
     };
+    this.pending = Promise.resolve();
     this.init();
   }
 
   init() {
-    try {
-      if (!fs.existsSync(this.dataDir)) {
-        fs.mkdirSync(this.dataDir, { recursive: true });
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    for (const file of [this.dataFile, `${this.dataFile}.bak`]) {
+      if (!fs.existsSync(file)) continue;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!parsed || ['history', 'favorites'].some(field => !parsed[field] || typeof parsed[field] !== 'object' || Array.isArray(parsed[field]))) throw new Error('Invalid user data');
+        for (const field of ['history', 'favorites']) this.state[field] = Object.assign(Object.create(null), parsed[field]);
+        this.loadError = null;
+        return;
+      } catch (error) {
+        this.loadError = error;
       }
-      if (fs.existsSync(this.dataFile)) {
-        const raw = fs.readFileSync(this.dataFile, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          for (const field of ['history', 'favorites']) {
-            const entries = parsed[field];
-            if (entries && typeof entries === 'object' && !Array.isArray(entries)) {
-              this.state[field] = Object.assign(Object.create(null), entries);
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[StoreService] 读取用户本地数据失败，将初始化新数据:', e.message);
     }
   }
 
-  save(nextState) {
-    fs.mkdirSync(this.dataDir, { recursive: true });
-    const tempFile = `${this.dataFile}.tmp`;
+  async rename(source, destination) {
+    for (let attempt = 0; ; attempt++) {
+      try { return await fs.promises.rename(source, destination); }
+      catch (error) {
+        if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code) || attempt >= 3) throw error;
+        await new Promise(resolve => setTimeout(resolve, 25 * (2 ** attempt)));
+      }
+    }
+  }
+
+  async save(nextState) {
+    if (this.loadError) throw new Error('用户数据损坏且无可用备份，请备份数据文件后修复');
+    await fs.promises.mkdir(this.dataDir, { recursive: true });
+    const tempFile = `${this.dataFile}.${randomUUID()}.tmp`;
+    const backupTemp = `${tempFile}.bak`;
     try {
-      fs.writeFileSync(tempFile, JSON.stringify(nextState, null, 2), { encoding: 'utf8', mode: 0o600 });
-      fs.renameSync(tempFile, this.dataFile);
+      await fs.promises.writeFile(tempFile, JSON.stringify(nextState, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await fs.promises.writeFile(backupTemp, JSON.stringify(this.state, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await this.rename(backupTemp, `${this.dataFile}.bak`);
+      await this.rename(tempFile, this.dataFile);
       this.state = nextState;
     } finally {
-      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+      await Promise.allSettled([tempFile, backupTemp].map(file => fs.promises.rm(file, { force: true })));
     }
+  }
+
+  mutate(update) {
+    const task = this.pending.catch(() => {}).then(async () => {
+      const { state, result } = update(this.state);
+      await this.save(state);
+      return result;
+    });
+    this.pending = task;
+    return task;
   }
 
   validateSeries(item) {
@@ -75,8 +95,7 @@ class StoreService {
       duration_sec: Number(item.duration_sec) || 0,
       updated_at: Date.now()
     };
-    this.save({ ...this.state, history: { ...this.state.history, [sid]: progress } });
-    return progress;
+    return this.mutate(state => ({ state: { ...state, history: { ...state.history, [sid]: progress } }, result: progress }));
   }
 
   /**
@@ -100,22 +119,16 @@ class StoreService {
   toggleFavorite(series) {
     this.validateSeries(series);
     const sid = String(series.series_id);
-    const favorites = { ...this.state.favorites };
-    if (Object.hasOwn(favorites, sid)) {
-      delete favorites[sid];
-      this.save({ ...this.state, favorites });
-      return false; // 取消收藏
-    } else {
-      favorites[sid] = {
-        series_id: sid,
-        series_title: series.series_title || '',
-        cover: series.cover || '',
-        episode_count: series.episode_count || series.total || 0,
-        updated_at: Date.now()
+    return this.mutate(state => {
+      const favorites = { ...state.favorites };
+      const exists = Object.hasOwn(favorites, sid);
+      if (exists) delete favorites[sid];
+      else favorites[sid] = {
+        series_id: sid, series_title: series.series_title || '', cover: series.cover || '',
+        episode_count: series.episode_count || series.total || 0, updated_at: Date.now()
       };
-      this.save({ ...this.state, favorites });
-      return true; // 已收藏
-    }
+      return { state: { ...state, favorites }, result: !exists };
+    });
   }
 
   /**
