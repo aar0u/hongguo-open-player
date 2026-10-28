@@ -329,7 +329,12 @@ createApp({
         const res = await fetch('/api/favorites/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(activeSeries.value)
+          body: JSON.stringify({
+            series_id: activeSeries.value.series_id,
+            series_title: activeSeries.value.series_title,
+            cover: activeSeries.value.cover,
+            episode_count: activeSeries.value.total
+          })
         }).then(r => r.json());
         isFavorited.value = !!res.is_favorite;
       } catch (err) {

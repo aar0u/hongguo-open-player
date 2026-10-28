@@ -74,3 +74,13 @@ test('a pending drama detail cannot reopen theater after navigating away', async
   await opening;
   assert.equal(state.viewMode.value, 'catalog');
 });
+
+test('favoriting a long series sends metadata without its full episode list', async () => {
+  let body;
+  const state = client(async (url, options) => { body = JSON.parse(options.body); return response({ is_favorite: true }); });
+  state.activeSeries.value = { series_id: '123', total: 1000, episodes: Array(1000).fill({ title: 'x'.repeat(1000) }) };
+  await state.toggleFavCurrent();
+  assert.equal(body.episode_count, 1000);
+  assert.equal(body.episodes, undefined);
+  assert.ok(JSON.stringify(body).length < 1024);
+});

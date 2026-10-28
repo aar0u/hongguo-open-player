@@ -143,13 +143,14 @@ async function runTests() {
     assert.strictEqual(histItem.episode_index, 4);
     assert.strictEqual(histItem.position_sec, 45.5);
 
+    const favoritePayload = { series_id: seriesId, series_title: seriesData.series_title, cover: seriesData.cover, episode_count: seriesData.total };
     // 收藏切换验证 (保证测试幂等性)
     const initialFavRes = await axios.get(`${BASE_URL}/api/favorites`);
     const initiallyFav = (initialFavRes.data || []).some(f => f.series_id === seriesId);
     if (initiallyFav) {
-      await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 先取消
+      await axios.post(`${BASE_URL}/api/favorites/toggle`, favoritePayload); // 先取消
     }
-    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 重新收藏
+    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, favoritePayload); // 重新收藏
     assert.strictEqual(toggleRes.status, 200);
     assert.strictEqual(toggleRes.data.is_favorite, true);
 
