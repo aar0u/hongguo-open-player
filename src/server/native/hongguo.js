@@ -967,7 +967,7 @@ function rebuildMoov(data, moovOff, moovSize, top) {
       const nc = data.readUInt32BE(b.off + 12);
       for (let i = 0; i < nc; i++) {
         const v = data.readUInt32BE(b.off + 16 + i * 4);
-        if (v >= delta) {
+        if (v >= moovOff + moovSize) {
           data.writeUInt32BE(v - delta, b.off + 16 + i * 4);
         }
       }

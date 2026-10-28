@@ -22,3 +22,22 @@ test('MP4 rejects nonadvancing, truncated and excessively nested boxes', () => {
   const valid = Buffer.concat([box('ftyp'), box('moov'), box('mdat', Buffer.from('media'))]);
   assert.deepEqual(decryptMp4Buffer(Buffer.from(valid)), valid);
 });
+
+test('moov reconstruction only shifts media offsets located after moov', () => {
+  function moov(offset) {
+    const table = Buffer.alloc(12);
+    table.writeUInt32BE(1, 4);
+    table.writeUInt32BE(offset, 8);
+    return box('moov', box('trak', box('mdia', box('minf', box('stbl',
+      Buffer.concat([box('stco', table), box('senc')]))))));
+  }
+  for (const mediaFirst of [true, false]) {
+    const media = box('mdat', Buffer.alloc(100));
+    const originalMoov = moov(0);
+    const offset = mediaFirst ? 8 : originalMoov.length + 8;
+    const input = mediaFirst ? Buffer.concat([media, moov(offset)]) : Buffer.concat([moov(offset), media]);
+    const output = decryptMp4Buffer(input);
+    const tablePosition = output.indexOf(Buffer.from('stco')) - 4;
+    assert.equal(output.readUInt32BE(tablePosition + 16), mediaFirst ? offset : offset - 8);
+  }
+});
