@@ -797,32 +797,12 @@ function deriveKey(spadeA) {
   }
 }
 
-/**
- * AES-128-ECB 加密
- */
-function aes128EcbEncrypt(key16, data) {
-  const cipher = crypto.createCipheriv('aes-128-ecb', key16, null);
-  cipher.setAutoPadding(false);
-  return Buffer.concat([cipher.update(data), cipher.final()]);
-}
-
-/**
- * CENC-AES-CTR 解密 sample
- */
+/** CENC uses an eight-byte sample nonce followed by a zero counter. */
 function decryptSample(key, nonce, cipher) {
-  if (!cipher || cipher.length === 0) return Buffer.alloc(0);
-  const nblocks = Math.ceil(cipher.length / 16);
-  const full = Buffer.alloc(nblocks * 16);
-  for (let k = 0; k < nblocks; k++) {
-    nonce.copy(full, k * 16, 0, 8);
-    full.writeBigUInt64BE(BigInt(k), k * 16 + 8);
-  }
-  const ks = aes128EcbEncrypt(key, full);
-  const plain = Buffer.alloc(cipher.length);
-  for (let i = 0; i < cipher.length; i++) {
-    plain[i] = cipher[i] ^ ks[i];
-  }
-  return plain;
+  const iv = Buffer.alloc(16);
+  nonce.copy(iv, 0);
+  const decipher = crypto.createDecipheriv('aes-128-ctr', key, iv);
+  return Buffer.concat([decipher.update(cipher), decipher.final()]);
 }
 
 /**

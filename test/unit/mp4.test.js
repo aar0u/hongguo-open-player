@@ -41,3 +41,14 @@ test('moov reconstruction only shifts media offsets located after moov', () => {
     assert.equal(output.readUInt32BE(tablePosition + 16), mediaFirst ? offset : offset - 8);
   }
 });
+
+test('native CTR decrypts complete and partial AES blocks including binary data', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  const crypto = require('node:crypto');
+  const key = crypto.randomBytes(16), nonce = crypto.randomBytes(8);
+  for (const length of [1, 15, 16, 17, 1024 * 1024 + 3]) {
+    const plain = crypto.randomBytes(length);
+    const output = decryptMp4Buffer(encryptedMp4(plain, key, nonce), key);
+    assert.deepEqual(output.subarray(output.indexOf(Buffer.from('mdat')) + 4), plain);
+  }
+});
