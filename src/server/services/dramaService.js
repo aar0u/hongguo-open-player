@@ -62,14 +62,17 @@ class DramaService {
     const genre = options.genre || '';
     try {
       const res = await hgCatalog.browseList({ page, category, genre });
-      if (res && Array.isArray(res.results) && res.results.length > 0) {
+      if (res && res.success !== false && Array.isArray(res.results)) {
         return res;
       }
     } catch (e) {
       console.warn('[DramaService] Catalog browse failed, trying fallback:', e.message);
     }
 
-    // 上游接口超时或无数据时，自动降级回退到全网热播搜索，保障高可用
+    if (category !== 'hot-drama' || genre) {
+      throw Object.assign(new Error('所选分类暂不可用，请稍后重试'), { status: 502 });
+    }
+    // Only the general hot chart can fall back to a general hot search.
     try {
       const fallback = await this.search('热播', page);
       if (fallback && Array.isArray(fallback.results) && fallback.results.length > 0) {
@@ -85,7 +88,7 @@ class DramaService {
       console.error('[DramaService] Fallback catalog search failed:', e.message);
     }
 
-    return { results: [], page: 1, total: 0, hasMore: false };
+    return { results: [], page, total: 0, hasMore: false };
   }
 
   /**

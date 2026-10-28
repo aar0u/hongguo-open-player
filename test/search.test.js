@@ -21,3 +21,14 @@ test('search forwards page options and preserves App pagination cursor', async t
   await assert.rejects(service.search(['bad']), /搜索词/);
   await assert.rejects(service.search('离婚', -1), /页码/);
 });
+
+test('catalog preserves terminal empty pages and never substitutes another category', async t => {
+  const catalog = require('../src/server/native/hongguo-app-catalog');
+  const original = catalog.browseList;
+  t.after(() => { catalog.browseList = original; });
+  const service = new Service();
+  catalog.browseList = async () => ({ success: true, results: [], page: 2, hasMore: false });
+  assert.equal((await service.catalog({ page: 2, category: 'comic-drama' })).page, 2);
+  catalog.browseList = async () => ({ success: false, error: 'upstream unavailable' });
+  await assert.rejects(service.catalog({ category: 'comic-drama' }), /所选分类/);
+});
