@@ -212,6 +212,7 @@ createApp({
       if (videoEl.value) videoEl.value.pause();
       resetPlayback();
       viewMode.value = 'catalog';
+      if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
 
     async function openTheater(drama) {
@@ -386,9 +387,11 @@ createApp({
             episode_count: activeSeries.value.total
           })
         }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
         isFavorited.value = !!res.is_favorite;
       } catch (err) {
         console.error('收藏切换失败:', err);
+        notify('收藏保存失败，请稍后重试');
       }
     }
 
@@ -421,6 +424,9 @@ createApp({
         duration.value = videoEl.value.duration || 0;
         videoEl.value.volume = Number(volume.value);
         videoEl.value.muted = isMuted.value;
+        if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
+          navigator.mediaSession.metadata = new MediaMetadata({ title: `${activeSeries.value?.series_title || ''} · 第 ${activeEpisodeIndex.value} 集`, artist: '红果开放播放器' });
+        }
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
         if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
           try {
@@ -537,9 +543,11 @@ createApp({
         } else if (e.code === 'ArrowLeft') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.max(0, videoEl.value.currentTime - 5);
+          showOSD('快退 5 秒');
         } else if (e.code === 'ArrowRight') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.min(duration.value, videoEl.value.currentTime + 5);
+          showOSD('快进 5 秒');
         } else if (e.key.toLowerCase() === 'm') {
           e.preventDefault();
           toggleMute();
