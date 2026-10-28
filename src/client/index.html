@@ -110,7 +110,9 @@
               <span class="playing-ep-badge">第 {{ activeEpisodeIndex }} 集 / 全 {{ activeSeries?.total || activeEpisodes.length }} 集</span>
             </div>
             <div class="player-actions">
-              <button class="back-btn" @click="sidebarOpen = !sidebarOpen" :aria-expanded="sidebarOpen" aria-controls="episode-sidebar">选集</button>
+              <button class="back-btn" :class="{ active: sidebarOpen }" @click="sidebarOpen = !sidebarOpen" :aria-expanded="sidebarOpen" aria-controls="episode-sidebar">
+                {{ sidebarOpen ? '收起选集' : '展开选集' }}
+              </button>
               <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
                 {{ isFavorited ? '❤️ 已收藏' : '🤍 收藏' }}
               </button>
@@ -124,6 +126,7 @@
               :key="currentStreamUrl"
               ref="videoEl"
               class="video-element"
+              :class="{ 'fit-cover': fitMode === 'cover' }"
               :src="currentStreamUrl"
               playsinline
               preload="auto"
@@ -138,7 +141,7 @@
               @waiting="isBuffering = true"
               @playing="isBuffering = false"
               @error="onVideoError"
-              @click="togglePlay"
+              @click="handleVideoClick"
             ></video>
 
             <!-- 居中缓冲加载环 -->
@@ -188,6 +191,10 @@
               </div>
 
               <div class="controls-right">
+                <!-- 画面比例模式 -->
+                <button class="ctrl-btn fit-btn" @click="toggleFitMode" :title="'画面比例 (当前: ' + (fitMode === 'contain' ? '完整自适应' : '铺满全屏') + ')'">
+                  {{ fitMode === 'contain' ? '⤢ 适应' : '⛶ 铺满' }}
+                </button>
                 <!-- 倍速选择 -->
                 <div class="speed-selector">
                   <select v-model="playbackRate" @change="changeSpeed">
@@ -213,7 +220,7 @@
               <span>快捷键：[空格] 播放/暂停</span>
               <span>[↑/↓] 上下集切换</span>
               <span>[←/→] 快退/快进 5s</span>
-              <span>[F] 全屏</span>
+              <span>[F] 或 [双击] 全屏</span>
             </div>
           </div>
         </div>

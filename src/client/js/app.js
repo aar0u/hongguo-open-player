@@ -362,6 +362,28 @@ createApp({
       videoEl.value.muted = isMuted.value;
     }
 
+    // 画面自适应模式: 'contain' (完整居中) | 'cover' (铺满视口)
+    const fitMode = ref('contain');
+    function toggleFitMode() {
+      fitMode.value = fitMode.value === 'contain' ? 'cover' : 'contain';
+      notify(fitMode.value === 'contain' ? '画面比例: 完整自适应' : '画面比例: 铺满全屏');
+    }
+
+    // 单击播放/暂停，双击切换全屏 (250ms 消抖防冲突)
+    let videoClickTimer = null;
+    function handleVideoClick() {
+      if (videoClickTimer) {
+        clearTimeout(videoClickTimer);
+        videoClickTimer = null;
+        toggleFullscreen();
+      } else {
+        videoClickTimer = setTimeout(() => {
+          videoClickTimer = null;
+          togglePlay();
+        }, 250);
+      }
+    }
+
     function toggleFullscreen() {
       if (!videoEl.value) return;
       if (!document.fullscreenElement) {
@@ -640,6 +662,9 @@ createApp({
       changeVolume,
       toggleMute,
       toggleFullscreen,
+      fitMode,
+      toggleFitMode,
+      handleVideoClick,
       toggleFavCurrent,
       onPlay,
       onPause,
