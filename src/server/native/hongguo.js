@@ -363,11 +363,6 @@ function seriesIdFromShareUrl(value) {
 async function resolveSeriesId(shareUrl) {
   if (typeof shareUrl !== 'string' || shareUrl.length > 8192) throw new Error('分享内容无效或过长');
   const trimmed = shareUrl.trim();
-  if (trimmed.startsWith('custom:')) {
-    if (!/^custom:[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}:\d{1,30}$/i.test(trimmed)) throw new Error('自定义剧集编号无效');
-    require('./custom-source').assertEnabled(trimmed);
-    return trimmed.toLowerCase();
-  }
   if (/^\d{1,30}$/.test(trimmed)) return trimmed;
   const linkPattern = /https?:\/\/[^\s<>"'，。！？；、【】（）]+/gi;
   // An explicit ID outside URLs is local input; attached links need not be visited or validated.
@@ -427,9 +422,7 @@ async function resolveSeriesId(shareUrl) {
  * 获取全集剧集列表
  */
 async function fetchEpisodeList(seriesId, options = {}) {
-  if (String(seriesId).startsWith('custom:')) return require('./custom-source').fetchEpisodeList(seriesId);
-  if (String(seriesId).startsWith('hema:')) return require('./hema').fetchEpisodeList(seriesId);
-  if (String(seriesId).startsWith('xifan:')) return require('./xifan').fetchEpisodeList(seriesId);
+  if (!/^\d{1,30}$/.test(String(seriesId))) throw Object.assign(new Error('剧集编号无效'), { status: 400 });
   return cachedRequest(`episodes:${seriesId}`, 60000,
     () => fetchEpisodeListFresh(seriesId, { deadline: Number(options.deadline) || 0 }),
     { force: options.force === true });
@@ -621,9 +614,6 @@ function parseModelVideo(vm) {
 async function fetchPlayUrlSingle(vid, sid, options = {}) {
   try {
     const quality = normalizeDownloadQuality(options.quality);
-    if (String(vid).startsWith('custom:') || String(sid).startsWith('custom:')) return require('./custom-source').fetchPlayUrlSingle(vid, sid, options);
-    if (String(vid).startsWith('hema:') || String(sid).startsWith('hema:')) return require('./hema').fetchPlayUrlSingle(vid, sid);
-    if (String(vid).startsWith('xifan:') || String(sid).startsWith('xifan:')) return require('./xifan').fetchPlayUrlSingle(vid, sid);
     const skipWeb = (failedWebMedia.get(String(vid)) || 0) > Date.now();
     const allowLowerQuality = options.allowLowerQuality === true && quality !== 'auto';
     const cacheKey = `play:${sid || ''}:${vid}${quality === 'auto' ? '' : `:${quality}`}${skipWeb ? ':fallback' : ''}${allowLowerQuality ? ':lower-quality' : ''}`;
@@ -797,32 +787,12 @@ function deriveKey(spadeA) {
   }
 }
 
-/**
- * AES-128-ECB 加密
- */
-function aes128EcbEncrypt(key16, data) {
-  const cipher = crypto.createCipheriv('aes-128-ecb', key16, null);
-  cipher.setAutoPadding(false);
-  return Buffer.concat([cipher.update(data), cipher.final()]);
-}
-
-/**
- * CENC-AES-CTR 解密 sample
- */
+/** CENC uses an eight-byte sample nonce followed by a zero counter. */
 function decryptSample(key, nonce, cipher) {
-  if (!cipher || cipher.length === 0) return Buffer.alloc(0);
-  const nblocks = Math.ceil(cipher.length / 16);
-  const full = Buffer.alloc(nblocks * 16);
-  for (let k = 0; k < nblocks; k++) {
-    nonce.copy(full, k * 16, 0, 8);
-    full.writeBigUInt64BE(BigInt(k), k * 16 + 8);
-  }
-  const ks = aes128EcbEncrypt(key, full);
-  const plain = Buffer.alloc(cipher.length);
-  for (let i = 0; i < cipher.length; i++) {
-    plain[i] = cipher[i] ^ ks[i];
-  }
-  return plain;
+  const iv = Buffer.alloc(16);
+  nonce.copy(iv, 0);
+  const decipher = crypto.createDecipheriv('aes-128-ctr', key, iv);
+  return Buffer.concat([decipher.update(cipher), decipher.final()]);
 }
 
 /**
@@ -858,7 +828,7 @@ function parseBoxes(data, start, end, depth = 0) {
 /**
  * 重建 moov box
  */
-function rebuildMoov(data, moovOff, moovSize, top) {
+function rebuildMoov(data, moovOff, moovSize, top, order = top, relocate) {
   const moovBox = top.find(b => b.typ === 'moov');
   if (!moovBox) throw new Error('no moov box');
 
@@ -905,7 +875,14 @@ function rebuildMoov(data, moovOff, moovSize, top) {
         if (etyp === 'encv' || etyp === 'enca') {
           const hdrSize = etyp === 'encv' ? 78 : 28;
           const children = parseBoxes(data, p + 8 + hdrSize, p + esize);
-          let newType = 'mp4a';
+          let newType;
+          if (etyp === 'enca') {
+            if (data.readUInt16BE(p + 16) !== 0) throw new Error('Unsupported audio sample entry version');
+            const sinf = children.find(child => child.typ === 'sinf');
+            const frma = sinf && parseBoxes(data, sinf.off + sinf.hdr, sinf.off + sinf.size).find(child => child.typ === 'frma');
+            newType = frma && frma.size === frma.hdr + 4 ? data.toString('latin1', frma.off + frma.hdr, frma.off + frma.hdr + 4) : null;
+            if (!['mp4a', 'ac-3', 'ec-3', 'Opus', 'fLaC'].includes(newType)) throw new Error('Unsupported protected audio codec');
+          }
           if (etyp === 'encv') {
             const sinf = children.find(child => child.typ === 'sinf');
             const frma = sinf && parseBoxes(data, sinf.off + sinf.hdr, sinf.off + sinf.size).find(child => child.typ === 'frma');
@@ -960,16 +937,31 @@ function rebuildMoov(data, moovOff, moovSize, top) {
   }
 
   const first = serialize(tree);
-  const delta = moovSize - first.length;
-
+  const destinations = new Map();
+  let destination = 0;
+  for (const box of order) {
+    destinations.set(box.off, destination);
+    destination += box.typ === 'moov' ? first.length : box.size;
+  }
   for (const b of walkChildren(tree)) {
-    if (b.typ === 'stco') {
-      const nc = data.readUInt32BE(b.off + 12);
-      for (let i = 0; i < nc; i++) {
-        const v = data.readUInt32BE(b.off + 16 + i * 4);
-        if (v >= moovOff + moovSize) {
-          data.writeUInt32BE(v - delta, b.off + 16 + i * 4);
+    if (b.typ === 'stco' || b.typ === 'co64') {
+      const count = data.readUInt32BE(b.off + b.hdr + 4);
+      const stride = b.typ === 'co64' ? 8 : 4;
+      if (b.hdr + 8 + count * stride > b.size) throw new Error('Invalid MP4 chunk table');
+      for (let i = 0; i < count; i++) {
+        const position = b.off + b.hdr + 8 + i * stride;
+        const old = stride === 8 ? Number(data.readBigUInt64BE(position)) : data.readUInt32BE(position);
+        if (relocate) {
+          const updated = relocate(old, first.length);
+          if (stride === 8) data.writeBigUInt64BE(BigInt(updated), position);
+          else data.writeUInt32BE(updated, position);
+          continue;
         }
+        const source = top.find(box => old >= box.off && old < box.off + box.size);
+        if (!Number.isSafeInteger(old) || !source) throw new Error('Invalid MP4 chunk offset');
+        const updated = old + destinations.get(source.off) - source.off;
+        if (stride === 8) data.writeBigUInt64BE(BigInt(updated), position);
+        else data.writeUInt32BE(updated, position);
       }
     }
   }
@@ -977,41 +969,42 @@ function rebuildMoov(data, moovOff, moovSize, top) {
   return serialize(tree);
 }
 
-/**
- * 解密 CENC-AES-CTR 加密的 MP4（内存版）
- * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
- * 注意：会就地修改传入的 Buffer（调用方应独占它）。
- */
-function decryptMp4Buffer(data, key) {
-  const total = data.length;
-  const top = parseBoxes(data, 0, total);
-  const moov = top.find(b => b.typ === 'moov');
-  if (!moov) throw new Error('no moov box found in MP4');
-
-  function getBox(boxes, typ) {
-    return (boxes || []).find(b => b.typ === typ);
-  }
-
+function mp4TrackInfo(data, top, total) {
+  const getBox = (boxes, type) => (boxes || []).find(box => box.typ === type);
   function* walkBoxes(boxes) {
-    for (const b of boxes) {
-      if (b.children) {
-        for (const x of walkBoxes(b.children)) yield x;
-      }
-      yield b;
-    }
+    for (const box of boxes) { if (box.children) yield* walkBoxes(box.children); yield box; }
   }
-
+  if (top.some(box => box.typ === 'moof')) throw new Error('Fragmented MP4 is not supported');
   const stbls = Array.from(walkBoxes(top)).filter(b => b.typ === 'stbl');
   const trackInfo = [];
+  let sampleBudget = 0;
   for (const stbl of stbls) {
     const stsz = getBox(stbl.children, 'stsz');
-    const stco = getBox(stbl.children, 'stco');
+    const stco = getBox(stbl.children, 'stco') || getBox(stbl.children, 'co64');
     const stsc = getBox(stbl.children, 'stsc');
     const senc = getBox(stbl.children, 'senc');
+    const stsd = getBox(stbl.children, 'stsd');
+    let encrypted = false;
+    if (stsd) {
+      let cursor = stsd.off + 16;
+      const count = data.readUInt32BE(stsd.off + 12);
+      for (let i = 0; i < count; i++) {
+        if (cursor + 8 > stsd.off + stsd.size) throw new Error('Truncated MP4 sample description');
+        const size = data.readUInt32BE(cursor);
+        if (size < 8 || cursor + size > stsd.off + stsd.size) throw new Error('Invalid MP4 sample description');
+        const type = data.toString('latin1', cursor + 4, cursor + 8);
+        encrypted ||= type === 'encv' || type === 'enca';
+        cursor += size;
+      }
+    }
+    if (encrypted && (!stsz || !stco || !stsc || !senc)) throw new Error('Unsupported encrypted MP4 track layout');
     if (!stsz || !stco || !stsc) continue;
 
     const ss = data.readUInt32BE(stsz.off + 12);
     const n = data.readUInt32BE(stsz.off + 16);
+    sampleBudget += n;
+    if (sampleBudget > 100000) throw new Error('MP4 sample count exceeds budget');
+    if (n > 100000 || (ss === 0 && 20 + n * 4 > stsz.size)) throw new Error('Invalid MP4 sample sizes');
     let sizes = [];
     if (ss === 0) {
       for (let i = 0; i < n; i++) {
@@ -1022,12 +1015,18 @@ function decryptMp4Buffer(data, key) {
     }
 
     const nc = data.readUInt32BE(stco.off + 12);
+    const chunkStride = stco.typ === 'co64' ? 8 : 4;
+    if (16 + nc * chunkStride > stco.size) throw new Error('Invalid MP4 chunk offsets');
     const chunkOffs = [];
     for (let i = 0; i < nc; i++) {
-      chunkOffs.push(data.readUInt32BE(stco.off + 16 + i * 4));
+      const position = stco.off + 16 + i * chunkStride;
+      const offset = chunkStride === 8 ? Number(data.readBigUInt64BE(position)) : data.readUInt32BE(position);
+      if (!Number.isSafeInteger(offset)) throw new Error('Unsafe MP4 chunk offset');
+      chunkOffs.push(offset);
     }
 
     const ns = data.readUInt32BE(stsc.off + 12);
+    if (16 + ns * 12 > stsc.size) throw new Error('Invalid MP4 sample-to-chunk table');
     const stscTab = [];
     for (let i = 0; i < ns; i++) {
       stscTab.push([
@@ -1040,11 +1039,20 @@ function decryptMp4Buffer(data, key) {
     const ivs = [];
     if (senc) {
       const sc = data.readUInt32BE(senc.off + 12);
+      if (data.readUInt32BE(senc.off + 8) !== 0 || sc !== n || senc.size !== 16 + sc * 8) {
+        throw new Error('Unsupported CENC encryption layout (requires full samples and 8-byte IVs)');
+      }
       for (let i = 0; i < sc; i++) {
         ivs.push(data.subarray(senc.off + 16 + i * 8, senc.off + 24 + i * 8));
       }
     }
 
+    if (!senc && stbl.children.some(box => ['saio', 'saiz'].includes(box.typ))) throw new Error('Unsupported external CENC auxiliary data');
+    if (n > 0 && (!stscTab.length || stscTab[0][0] !== 1)) throw new Error('Invalid first MP4 chunk');
+    for (let i = 0; i < stscTab.length; i++) {
+      const [first, samples] = stscTab[i];
+      if (first < 1 || first > nc || samples < 1 || samples > n || (i && first <= stscTab[i - 1][0])) throw new Error('Invalid MP4 chunk mapping');
+    }
     const chunkSpc = {};
     for (let i = 0; i < stscTab.length; i++) {
       const fc = stscTab[i][0];
@@ -1068,14 +1076,45 @@ function decryptMp4Buffer(data, key) {
       }
     }
 
+    if (si !== n) throw new Error('MP4 sample-to-chunk count mismatch');
     trackInfo.push({ sizes, offs: sampleOffs, ivs, stco });
   }
+
+  return trackInfo;
+}
+
+/**
+ * 解密 CENC-AES-CTR 加密的 MP4（内存版）
+ * 输入一个完整的加密 MP4 Buffer，返回解密并重建过 moov 的 Buffer。
+ * 输入保持不变；整集兼容路径使用独立工作缓冲。
+ */
+function decryptMp4Buffer(input, key) {
+  const data = Buffer.from(input);
+  const total = data.length;
+  const top = parseBoxes(data, 0, total);
+  const moov = top.find(b => b.typ === 'moov');
+  if (!moov) throw new Error('no moov box found in MP4');
+
+  function getBox(boxes, typ) {
+    return (boxes || []).find(b => b.typ === typ);
+  }
+
+  function* walkBoxes(boxes) {
+    for (const b of boxes) {
+      if (b.children) {
+        for (const x of walkBoxes(b.children)) yield x;
+      }
+      yield b;
+    }
+  }
+
+  const trackInfo = mp4TrackInfo(data, top, total);
 
   for (const ti of trackInfo) {
     for (let i = 0; i < ti.offs.length; i++) {
       const off = ti.offs[i];
       const sz = ti.sizes[i];
-      if (off + sz > total) continue;
+      if (off + sz > total) throw new Error('MP4 sample exceeds file bounds');
       if (i < ti.ivs.length) {
         const nonce = ti.ivs[i].subarray(0, 8);
         const cipher = data.subarray(off, off + sz);
@@ -1085,11 +1124,50 @@ function decryptMp4Buffer(data, key) {
     }
   }
 
-  const newMoov = rebuildMoov(data, moov.off, moov.size, top);
-  const out = top.map(box => box.typ === 'moov'
+  const order = [...top];
+  const firstMedia = order.findIndex(box => box.typ === 'mdat');
+  if (firstMedia >= 0 && order.indexOf(moov) > firstMedia) {
+    order.splice(order.indexOf(moov), 1);
+    order.splice(firstMedia, 0, moov);
+  }
+  const newMoov = rebuildMoov(data, moov.off, moov.size, top, order);
+  const out = order.map(box => box.typ === 'moov'
     ? newMoov : data.subarray(box.off, box.off + box.size));
 
   return Buffer.concat(out);
+}
+
+function createMp4StreamingPlan(metadata, boxes, total) {
+  if (boxes.some(box => box.typ === 'moof')) throw new Error('Fragmented MP4 is not supported');
+  const localBoxes = parseBoxes(metadata, 0, metadata.length);
+  const moov = boxes.find(box => box.typ === 'moov');
+  const order = boxes.filter(box => box !== moov);
+  const firstMedia = order.findIndex(box => box.typ === 'mdat');
+  if (!moov || firstMedia < 0) throw new Error('MP4 requires moov and mdat');
+  order.splice(firstMedia, 0, moov);
+  const tracks = mp4TrackInfo(metadata, localBoxes, total);
+  const relocate = (offset, moovSize) => {
+    if (!Number.isSafeInteger(offset)) throw new Error('Unsafe MP4 offset');
+    let destination = 0;
+    for (const box of order) {
+      if (box.typ !== 'moov' && offset >= box.off && offset < box.off + box.size) return destination + offset - box.off;
+      destination += box.typ === 'moov' ? moovSize : box.size;
+    }
+    throw new Error('MP4 offset outside media');
+  };
+  const rebuilt = rebuildMoov(metadata, 0, metadata.length, localBoxes, localBoxes, relocate);
+  let size = 0;
+  const segments = order.map(box => {
+    const segment = { start: size, size: box.typ === 'moov' ? rebuilt.length : box.size,
+      ...(box.typ === 'moov' ? { buffer: rebuilt } : { remote: box.off }) };
+    size += segment.size;
+    return segment;
+  });
+  const samples = tracks.flatMap(track => track.ivs.map((iv, index) => ({ offset: track.offs[index], size: track.sizes[index], iv })))
+    .sort((a, b) => a.offset - b.offset);
+  if (samples.length > 100000) throw new Error('MP4 sample count exceeds streaming budget');
+  for (const sample of samples) if (!Number.isSafeInteger(sample.offset) || sample.offset + sample.size > total) throw new Error('Invalid encrypted MP4 sample');
+  return { size, segments, samples };
 }
 
 /**
@@ -1110,6 +1188,7 @@ module.exports = {
   deriveKey,
   decryptMp4File,
   decryptMp4Buffer,
+  createMp4StreamingPlan,
   VIDEO_REFERER,
   UA,
   WEB_UA,

@@ -52,9 +52,10 @@
       <!-- 剧集卡片网格列表 -->
       <div v-if="viewMode === 'catalog'" class="catalog-container">
         <!-- 加载中指示器 -->
-        <div v-if="loadingCatalog" class="loading-state">
-          <div class="spinner"></div>
-          <p>正在获取短剧列表...</p>
+        <div v-if="loadingCatalog" class="drama-grid" aria-label="正在加载短剧" aria-busy="true">
+          <div v-for="n in 8" :key="n" class="skeleton-card" aria-hidden="true">
+            <div class="skeleton-cover"></div><div class="skeleton-line"></div><div class="skeleton-line short"></div>
+          </div>
         </div>
 
         <!-- 列表空状态 -->
@@ -109,6 +110,7 @@
               <span class="playing-ep-badge">第 {{ activeEpisodeIndex }} 集 / 全 {{ activeSeries?.total || activeEpisodes.length }} 集</span>
             </div>
             <div class="player-actions">
+              <button class="back-btn" @click="sidebarOpen = !sidebarOpen" :aria-expanded="sidebarOpen" aria-controls="episode-sidebar">选集</button>
               <button class="fav-action-btn" :class="{ favorited: isFavorited }" @click="toggleFavCurrent">
                 {{ isFavorited ? '❤️ 已收藏' : '🤍 收藏' }}
               </button>
@@ -117,6 +119,7 @@
 
           <!-- 视频播放核心区 -->
           <div class="video-stage">
+            <div v-if="osdMessage" class="player-osd" role="status">{{ osdMessage }}</div>
             <video 
               :key="currentStreamUrl"
               ref="videoEl"
@@ -160,7 +163,11 @@
           <!-- 播放器控制条 -->
           <div class="player-controls">
             <!-- 进度条 -->
-            <div class="progress-bar-container" @click="seekByClick">
+            <div class="progress-bar-container" @pointermove="previewSeek" @pointerleave="showPreview = false">
+              <span v-if="showPreview || isScrubbing" class="progress-time-tooltip" :style="{ left: previewPercent + '%' }">{{ formatTime(isScrubbing ? currentTime : previewTime) }}</span>
+              <input class="seek-input" type="range" min="0" :max="duration || 0" step="0.1" :value="currentTime"
+                :disabled="!duration" aria-label="播放进度" :aria-valuetext="formatTime(currentTime)"
+                @input="seekFromSlider" @pointerdown="startScrubbing" @pointerup="finishScrubbing" @pointercancel="finishScrubbing" @lostpointercapture="finishScrubbing" />
               <div class="progress-bar-buffered" :style="{ width: bufferedPercent + '%' }"></div>
               <div class="progress-bar-played" :style="{ width: playedPercent + '%' }"></div>
               <div class="progress-bar-thumb" :style="{ left: playedPercent + '%' }"></div>
@@ -212,7 +219,7 @@
         </div>
 
         <!-- 右侧选集与短剧详情侧栏 -->
-        <aside class="theater-sidebar">
+        <aside v-show="sidebarOpen" id="episode-sidebar" class="theater-sidebar">
           <div class="sidebar-drama-header">
             <img :src="activeSeries?.cover" class="sidebar-cover" @error="onImageError"/>
             <div class="sidebar-meta">
@@ -256,6 +263,7 @@
         </aside>
       </div>
     </main>
+    <div v-if="toastText" class="app-toast" role="status" aria-live="polite">{{ toastText }}</div>
   </div>
 
   <!-- 引入本地 Vue 3 -->

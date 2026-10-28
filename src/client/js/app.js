@@ -3,7 +3,8 @@ const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
 // 自动识别 macOS / Windows / Linux 宿主平台并注入 root class
 const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.userAgentData && navigator.userAgentData.platform === 'macOS');
-document.documentElement.classList.add(isMac ? 'platform-mac' : 'platform-win');
+const isDesktop = /Electron\//.test(navigator.userAgent);
+document.documentElement.classList.add(isDesktop ? (isMac ? 'platform-mac' : /Windows/i.test(navigator.userAgent) ? 'platform-win' : 'platform-linux') : 'platform-browser');
 
 createApp({
   setup() {
@@ -41,6 +42,51 @@ createApp({
     let pendingResumeSec = 0;
     let progressReady = false;
     let theaterRequest = 0;
+    let catalogScrollTop = 0;
+    let fullscreenExitAt = 0;
+    const toastText = ref('');
+    const osdMessage = ref('');
+    let toastTimer, osdTimer;
+    const sidebarOpen = ref(true);
+    const isScrubbing = ref(false);
+    const previewTime = ref(0);
+    const previewPercent = ref(0);
+    const showPreview = ref(false);
+    function previewSeek(event) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const fraction = rect.width ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0;
+      previewPercent.value = fraction * 100;
+      previewTime.value = fraction * duration.value;
+      showPreview.value = true;
+    }
+    function seekFromSlider(event) {
+      if (!videoEl.value || !Number.isFinite(duration.value) || duration.value <= 0) return;
+      const target = Math.max(0, Math.min(duration.value, Number(event.target.value)));
+      videoEl.value.currentTime = target;
+      currentTime.value = target;
+    }
+    function startScrubbing(event) {
+      isScrubbing.value = true;
+      event.target.setPointerCapture?.(event.pointerId);
+    }
+    function finishScrubbing() {
+      isScrubbing.value = false;
+      showPreview.value = false;
+      saveProgressNow();
+    }
+    function notify(message) {
+      toastText.value = message;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toastText.value = ''; }, 4000);
+    }
+    function showOSD(message) {
+      osdMessage.value = message;
+      clearTimeout(osdTimer);
+      osdTimer = setTimeout(() => { osdMessage.value = ''; }, 1000);
+    }
+    function fullscreenChanged() {
+      if (!document.fullscreenElement) fullscreenExitAt = Date.now();
+    }
 
     // 当前选集分组
     const currentGroup = ref({ start: 1, end: 30 });
@@ -166,6 +212,7 @@ createApp({
       if (videoEl.value) videoEl.value.pause();
       resetPlayback();
       viewMode.value = 'catalog';
+      if (navigator.mediaSession) { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; }
     }
 
     async function openTheater(drama) {
@@ -176,14 +223,16 @@ createApp({
         const detail = await fetch(`/api/series/${encodeURIComponent(drama.series_id)}`).then(r => r.json());
         if (request !== theaterRequest) return;
         if (!detail || !detail.episodes || detail.episodes.length === 0) {
-          alert('获取该短剧分集失败，请重试');
-          return;
+          throw new Error(detail?.error || '获取该短剧分集失败，请重试');
         }
 
         saveProgressNow();
         if (videoEl.value) videoEl.value.pause();
         resetPlayback();
+        catalogScrollTop = window.scrollY || 0;
         activeSeries.value = detail;
+        const watched = detail.saved_progress?.watched_indexes || [detail.saved_progress?.episode_index];
+        watchedMap.value.set(detail.series_id, new Set(watched.filter(index => Number.isInteger(index) && index > 0)));
         activeEpisodes.value = detail.episodes;
         isFavorited.value = !!detail.is_favorite;
 
@@ -221,15 +270,15 @@ createApp({
       } catch (err) {
         if (request !== theaterRequest) return;
         console.error('打开剧场失败:', err);
-        alert('加载剧集失败: ' + err.message);
-      } finally {
-        if (request === theaterRequest) isBuffering.value = false;
+        notify('加载剧集失败: ' + err.message);
+        isBuffering.value = false;
       }
     }
 
     function closeTheater() {
       leaveTheater();
-      loadCatalog();
+      if (['history', 'favorites'].includes(currentTab.value)) loadCatalog();
+      nextTick(() => window.scrollTo?.(0, catalogScrollTop));
     }
 
     function switchEpisode(ep) {
@@ -241,7 +290,7 @@ createApp({
       activeEpisodeIndex.value = ep.vid_index;
       currentTime.value = 0;
 
-      markWatched(ep.vid_index);
+
 
       nextTick(() => {
         if (videoEl.value) {
@@ -303,6 +352,7 @@ createApp({
       if (videoEl.value) {
         videoEl.value.volume = parseFloat(volume.value);
         isMuted.value = (videoEl.value.volume === 0);
+        videoEl.value.muted = isMuted.value;
       }
     }
 
@@ -315,8 +365,9 @@ createApp({
     function toggleFullscreen() {
       if (!videoEl.value) return;
       if (!document.fullscreenElement) {
-        videoEl.value.requestFullscreen().catch(err => {
-          alert('全屏模式调用失败: ' + err.message);
+        const target = videoEl.value.closest?.('.player-container') || videoEl.value;
+        target.requestFullscreen().catch(err => {
+          notify('全屏模式调用失败: ' + err.message);
         });
       } else {
         document.exitFullscreen().catch(console.error);
@@ -329,11 +380,18 @@ createApp({
         const res = await fetch('/api/favorites/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(activeSeries.value)
+          body: JSON.stringify({
+            series_id: activeSeries.value.series_id,
+            series_title: activeSeries.value.series_title,
+            cover: activeSeries.value.cover,
+            episode_count: activeSeries.value.total
+          })
         }).then(r => r.json());
+        if (res.error) throw new Error(res.error);
         isFavorited.value = !!res.is_favorite;
       } catch (err) {
         console.error('收藏切换失败:', err);
+        notify('收藏保存失败，请稍后重试');
       }
     }
 
@@ -342,6 +400,8 @@ createApp({
     function onPlay(event) {
       if (event && event.target !== videoEl.value) return;
       isPlaying.value = true;
+      markWatched(activeEpisodeIndex.value);
+      if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
       isBuffering.value = false;
     }
 
@@ -353,6 +413,7 @@ createApp({
     function onPause(event) {
       if (event && event.target !== videoEl.value) return;
       isPlaying.value = false;
+      if (navigator.mediaSession) navigator.mediaSession.playbackState = 'paused';
       saveProgressNow();
     }
 
@@ -363,6 +424,9 @@ createApp({
         duration.value = videoEl.value.duration || 0;
         videoEl.value.volume = Number(volume.value);
         videoEl.value.muted = isMuted.value;
+        if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
+          navigator.mediaSession.metadata = new MediaMetadata({ title: `${activeSeries.value?.series_title || ''} · 第 ${activeEpisodeIndex.value} 集`, artist: '红果开放播放器' });
+        }
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
         if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
           try {
@@ -376,6 +440,7 @@ createApp({
     }
 
     function onTimeUpdate(event) {
+      if (isScrubbing.value) return;
       if (event && event.target !== videoEl.value) return;
       if (videoEl.value) {
         currentTime.value = videoEl.value.currentTime || 0;
@@ -396,7 +461,11 @@ createApp({
     function onVideoError(e) {
       console.error('[Player] 视频播放器报错:', e);
       isBuffering.value = false;
-      videoErrorMessage.value = '视频解密或解码失败，请点击重试';
+      if (e?.target && e.target !== videoEl.value) return;
+      const code = videoEl.value?.error?.code;
+      videoErrorMessage.value = code === 3 || code === 4
+        ? '视频格式无法解码；请重试或选择其他分集，并检查系统解码器'
+        : '视频加载失败，请检查网络后重试';
     }
 
     function retryCurrentEpisode() {
@@ -445,9 +514,10 @@ createApp({
           episode_index: activeEpisodeIndex.value,
           vid: curEp?.vid || '',
           position_sec: currentTime.value,
-          duration_sec: duration.value
+          duration_sec: duration.value,
+          watched_indexes: [...(watchedMap.value.get(activeSeries.value.series_id) || [])]
         })
-      }).catch(err => console.warn('同步进度失败:', err));
+      }).then(response => { if (!response.ok) throw new Error('保存失败'); }).catch(() => notify('观看进度保存失败，请检查数据目录是否可写'));
     }
 
     function onImageError(e) {
@@ -457,12 +527,13 @@ createApp({
     // ================= 键盘快捷键监听 =================
 
     function handleKeyDown(e) {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(e.target.tagName) || e.target.isContentEditable) return;
 
       if (viewMode.value === 'theater') {
         if (e.code === 'Space' || e.key === 'k') {
           e.preventDefault();
           togglePlay();
+          showOSD(videoEl.value?.paused ? '已暂停' : '继续播放');
         } else if (e.code === 'ArrowUp') {
           e.preventDefault();
           playPrevEpisode();
@@ -472,13 +543,21 @@ createApp({
         } else if (e.code === 'ArrowLeft') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.max(0, videoEl.value.currentTime - 5);
+          showOSD('快退 5 秒');
         } else if (e.code === 'ArrowRight') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.min(duration.value, videoEl.value.currentTime + 5);
+          showOSD('快进 5 秒');
+        } else if (e.key.toLowerCase() === 'm') {
+          e.preventDefault();
+          toggleMute();
+          showOSD(isMuted.value ? '静音' : '开启声音');
         } else if (e.key === 'f' || e.key === 'F') {
           e.preventDefault();
           toggleFullscreen();
         } else if (e.code === 'Escape') {
+          if (document.fullscreenElement) { document.exitFullscreen().catch(console.error); return; }
+          if (Date.now() - fullscreenExitAt < 300) return;
           closeTheater();
         }
       }
@@ -488,6 +567,13 @@ createApp({
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('pagehide', saveProgressNow);
+      document.addEventListener?.('fullscreenchange', fullscreenChanged);
+      if (navigator.mediaSession) {
+        const actions = { play: () => videoEl.value?.play(), pause: () => videoEl.value?.pause(), previoustrack: playPrevEpisode, nexttrack: playNextEpisode };
+        for (const [name, handler] of Object.entries(actions)) {
+          try { navigator.mediaSession.setActionHandler(name, handler); } catch (_) {}
+        }
+      }
       // 定时每 4 秒静默上报进度
       progressTimer = setInterval(() => {
         if (viewMode.value === 'theater' && isPlaying.value) {
@@ -499,10 +585,17 @@ createApp({
     onUnmounted(() => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('pagehide', saveProgressNow);
+      document.removeEventListener?.('fullscreenchange', fullscreenChanged);
+      clearTimeout(toastTimer); clearTimeout(osdTimer);
+      if (navigator.mediaSession) for (const name of ['play', 'pause', 'previoustrack', 'nexttrack']) {
+        try { navigator.mediaSession.setActionHandler(name, null); } catch (_) {}
+      }
       if (progressTimer) clearInterval(progressTimer);
     });
 
     return {
+      toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
+      previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
       viewMode,
       currentTab,
       searchKeyword,

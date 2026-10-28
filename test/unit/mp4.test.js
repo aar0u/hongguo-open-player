@@ -23,7 +23,7 @@ test('MP4 rejects nonadvancing, truncated and excessively nested boxes', () => {
   assert.deepEqual(decryptMp4Buffer(Buffer.from(valid)), valid);
 });
 
-test('moov reconstruction only shifts media offsets located after moov', () => {
+test('faststart places moov before media and relocates chunk offsets', () => {
   function moov(offset) {
     const table = Buffer.alloc(12);
     table.writeUInt32BE(1, 4);
@@ -38,6 +38,33 @@ test('moov reconstruction only shifts media offsets located after moov', () => {
     const input = mediaFirst ? Buffer.concat([media, moov(offset)]) : Buffer.concat([moov(offset), media]);
     const output = decryptMp4Buffer(input);
     const tablePosition = output.indexOf(Buffer.from('stco')) - 4;
-    assert.equal(output.readUInt32BE(tablePosition + 16), mediaFirst ? offset : offset - 8);
+    assert.equal(output.readUInt32BE(tablePosition + 16), originalMoov.length);
+    assert.ok(output.indexOf(Buffer.from('moov')) < output.indexOf(Buffer.from('mdat')));
   }
+});
+
+test('native CTR decrypts complete and partial AES blocks including binary data', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  const crypto = require('node:crypto');
+  const key = crypto.randomBytes(16), nonce = crypto.randomBytes(8);
+  for (const length of [1, 15, 16, 17, 1024 * 1024 + 3]) {
+    const plain = crypto.randomBytes(length);
+    const output = decryptMp4Buffer(encryptedMp4(plain, key, nonce), key);
+    assert.deepEqual(output.subarray(output.indexOf(Buffer.from('mdat')) + 4), plain);
+  }
+});
+
+test('unsupported subsample and 16-byte IV CENC layouts fail explicitly', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  for (const [nonce, flags] of [[Buffer.alloc(8), 2], [Buffer.alloc(16), 0]]) {
+    assert.throws(() => decryptMp4Buffer(encryptedMp4(Buffer.alloc(32), Buffer.alloc(16), nonce, flags), Buffer.alloc(16)), /Unsupported CENC/);
+  }
+});
+
+test('whole-file decryption preserves the encrypted input buffer', () => {
+  const { encryptedMp4 } = require('../helpers/mp4');
+  const input = encryptedMp4(Buffer.alloc(31), Buffer.alloc(16), Buffer.alloc(8));
+  const original = Buffer.from(input);
+  decryptMp4Buffer(input, Buffer.alloc(16));
+  assert.deepEqual(input, original);
 });

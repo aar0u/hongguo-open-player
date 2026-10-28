@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
 const path = require('path');
 
 // 必须在 app.whenReady 之前注入 Chromium 硬件解码与 macOS VideoToolbox HEVC (H.265) 解码开关
@@ -10,8 +10,18 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 let mainWindow = null;
 let serverInstance = null;
 let serverStart = null;
+let windowCreation = null;
+function createWindow() {
+  if (mainWindow) { mainWindow.focus(); return Promise.resolve(); }
+  windowCreation ||= buildWindow().catch(error => {
+    console.error('Window startup failed:', error);
+    dialog.showErrorBox('播放器启动失败', '无法启动本地播放服务，请关闭应用后重试。');
+    app.quit();
+  }).finally(() => { windowCreation = null; });
+  return windowCreation;
+}
 
-async function createWindow() {
+async function buildWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
   process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
   const { startServer } = require('../server/index.js');
@@ -45,6 +55,10 @@ async function createWindow() {
   } else {
     // Windows 平台专属配置
     windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
+    if (process.platform === 'win32') {
+      windowOptions.titleBarStyle = 'hidden';
+      windowOptions.titleBarOverlay = { color: '#14171f', symbolColor: '#ffffff', height: 40 };
+    }
   }
 
   const window = new BrowserWindow(windowOptions);
@@ -55,9 +69,12 @@ async function createWindow() {
     if (/^https?:/.test(url)) shell.openExternal(url).catch(console.error);
     return { action: 'deny' };
   });
-  window.webContents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== appUrl) event.preventDefault();
-  });
+  const guardNavigation = (event, url) => {
+    try { if (new URL(url).origin === appUrl) return; } catch (_) {}
+    event.preventDefault();
+  };
+  window.webContents.on('will-navigate', guardNavigation);
+  window.webContents.on('will-redirect', guardNavigation);
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
   });
@@ -87,6 +104,7 @@ function setupMenu() {
           }
         ]
       : []),
+    ...(!isMac ? [{ label: '文件', submenu: [{ role: 'close', label: '关闭窗口' }, { role: 'quit', label: '退出' }] }] : []),
     {
       label: '编辑',
       submenu: [
@@ -177,9 +195,14 @@ if (!gotTheLock) {
     }
   });
 
-  app.on('before-quit', () => {
-    if (serverInstance) {
-      serverInstance.close();
-    }
+  let quitting = false;
+  app.on('before-quit', event => {
+    if (quitting || !serverInstance) return;
+    quitting = true;
+    event.preventDefault();
+    require('../server/services/streamService').shutdown();
+    serverInstance.close();
+    serverInstance.closeAllConnections?.();
+    require('../server/services/storeService').pending.catch(console.error).finally(() => app.quit());
   });
 }

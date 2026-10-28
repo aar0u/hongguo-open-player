@@ -2,8 +2,6 @@ name: Build & Release Native Apps
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
   workflow_dispatch:

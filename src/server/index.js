@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const express = require('express');
 const path = require('path');
+const { randomBytes } = require('node:crypto');
+const sessionToken = randomBytes(32).toString('hex');
 const dramaService = require('./services/dramaService');
 const streamService = require('./services/streamService');
 const storeService = require('./services/storeService');
@@ -8,13 +10,34 @@ const storeService = require('./services/storeService');
 const app = express();
 const PORT = process.env.PORT || 8899;
 
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    // Vue's local template compiler currently requires unsafe-eval.
+    'Content-Security-Policy': "default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  });
+  next();
+});
+
 // Only the local application's own origin may access personal data or trigger downloads.
 app.use((req, res, next) => {
   const hosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
   if (!hosts.includes(req.headers.host) ||
       (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) ||
-      req.headers['sec-fetch-site'] === 'cross-site') {
+      ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) {
     return res.status(403).json({ error: '仅允许本地播放器访问' });
+  }
+  next();
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    const cookies = String(req.headers.cookie || '').split(';').map(value => value.trim());
+    if (!cookies.includes(`player_session=${sessionToken}`)) return res.status(401).json({ error: '请从播放器首页建立本地会话' });
+  } else if (req.path === '/' || req.path === '/index.html') {
+    res.cookie('player_session', sessionToken, { httpOnly: true, sameSite: 'strict', path: '/' });
+    res.set('Cache-Control', 'no-store');
   }
   next();
 });
@@ -23,6 +46,20 @@ app.use(express.json({ limit: '64kb' }));
 // 静态前端资源目录
 const clientDir = path.join(__dirname, '../client');
 app.use(express.static(clientDir));
+
+function sendApiError(res, error) {
+  const status = error.status >= 400 && error.status < 600 ? error.status : 500;
+  const messages = {
+    DEVICE_REGISTRATION_FAILED: '播放设备注册暂时失败，请稍后重试',
+    ETIMEDOUT: '上游请求超时，请稍后重试',
+    SECURITY_BLOCKED: '视频源地址未通过安全检查',
+    EACCES: '无法访问本地数据目录，请检查写入权限',
+    EPERM: '无法保存本地数据，请稍后重试',
+    EBUSY: '本地数据文件正被占用，请稍后重试'
+  };
+  console.error('[API]', error.code || 'REQUEST_FAILED', error.message);
+  res.status(status).json({ error: status === 400 ? error.message : messages[error.code] || '操作失败，请稍后重试' });
+}
 
 // ================= API 路由 =================
 
@@ -35,7 +72,7 @@ app.get('/api/catalog', async (req, res) => {
     const data = await dramaService.catalog({ page, category, genre });
     res.json(data);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -48,7 +85,7 @@ app.get('/api/search', async (req, res) => {
     const data = await dramaService.search(keyword, page);
     res.json(data);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -68,7 +105,7 @@ app.get('/api/series/:seriesId', async (req, res) => {
       is_favorite: isFav
     });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -82,7 +119,7 @@ app.get('/api/play/:vid', async (req, res) => {
     const playInfo = await dramaService.getPlayInfo(vid, quality);
     res.json(playInfo);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -102,13 +139,13 @@ app.get('/api/history', (req, res) => {
   res.json(storeService.getHistory());
 });
 
-app.post('/api/progress', (req, res) => {
+app.post('/api/progress', async (req, res) => {
   try {
     const item = req.body;
-    const updated = storeService.updateProgress(item);
+    const updated = await storeService.updateProgress(item);
     res.json({ success: true, progress: updated });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -119,16 +156,21 @@ app.get('/api/favorites', (req, res) => {
   res.json(storeService.getFavorites());
 });
 
-app.post('/api/favorites/toggle', (req, res) => {
+app.post('/api/favorites/toggle', async (req, res) => {
   try {
-    const isFav = storeService.toggleFavorite(req.body);
+    const isFav = await storeService.toggleFavorite(req.body);
     res.json({ success: true, is_favorite: isFav });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  sendApiError(res, error);
+});
 
 // 前端 SPA 页面兜底
 app.use((req, res) => {

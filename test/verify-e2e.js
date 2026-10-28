@@ -18,14 +18,16 @@ async function runTests() {
     const { server, port } = await startServer(0);
     serverInstance = server;
     const BASE_URL = `http://127.0.0.1:${port}`;
+    const client = axios.create();
     // 1. 验证静态前端资源服务
     console.log('▶ [1/7] 验证静态前端资源交付...');
-    const htmlRes = await axios.get(`${BASE_URL}/`);
+    const htmlRes = await client.get(`${BASE_URL}/`);
     assert.strictEqual(htmlRes.status, 200);
+    client.defaults.headers.common.Cookie = htmlRes.headers['set-cookie'][0].split(';')[0];
     assert(htmlRes.data.includes('红果开放播放器'), 'index.html 标题应正确');
     assert(htmlRes.data.includes('vue.global.prod.js'), '应包含本地 Vue 3 引用');
 
-    const jsRes = await axios.get(`${BASE_URL}/js/app.js`);
+    const jsRes = await client.get(`${BASE_URL}/js/app.js`);
     assert.strictEqual(jsRes.status, 200);
     assert(jsRes.data.includes('createApp'), 'app.js 应成功送达');
     console.log('  ✅ 前端静态 SPA 资源交付正常\n');
@@ -35,7 +37,7 @@ async function runTests() {
     let catalogRes;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        catalogRes = await axios.get(`${BASE_URL}/api/catalog?category=hot-drama&page=1`, { timeout: 15000 });
+        catalogRes = await client.get(`${BASE_URL}/api/catalog?category=hot-drama&page=1`, { timeout: 15000 });
         if (catalogRes.status === 200 && catalogRes.data?.results?.length > 0) break;
       } catch (err) {
         if (attempt === 3) throw err;
@@ -54,7 +56,7 @@ async function runTests() {
     let searchRes;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        searchRes = await axios.get(`${BASE_URL}/api/search?keyword=${encodeURIComponent(testKeyword)}`, { timeout: 15000 });
+        searchRes = await client.get(`${BASE_URL}/api/search?keyword=${encodeURIComponent(testKeyword)}`, { timeout: 15000 });
         if (searchRes.status === 200 && searchRes.data?.results?.length > 0) break;
       } catch (err) {
         if (attempt === 3) throw err;
@@ -72,7 +74,7 @@ async function runTests() {
     // 4. 验证全部分集列表获取
     console.log('▶ [4/7] 验证剧集全集拉取 (GET /api/series/:seriesId)...');
     const seriesId = targetDrama.series_id || '7696091370296970265';
-    const seriesRes = await axios.get(`${BASE_URL}/api/series/${seriesId}`);
+    const seriesRes = await client.get(`${BASE_URL}/api/series/${seriesId}`);
     assert.strictEqual(seriesRes.status, 200);
     const seriesData = seriesRes.data;
     assert.strictEqual(seriesData.series_id, seriesId);
@@ -85,7 +87,7 @@ async function runTests() {
     // 5. 验证单集视频解析与 Spade-A 密钥派生
     console.log('▶ [5/7] 验证单集播放信息解析 (GET /api/play/:vid)...');
     const ep4 = seriesData.episodes[3]; // 选择第 4 集（超越免费集数壁垒）
-    const playRes = await axios.get(`${BASE_URL}/api/play/${ep4.vid}?quality=1080p`);
+    const playRes = await client.get(`${BASE_URL}/api/play/${ep4.vid}?quality=1080p`);
     assert.strictEqual(playRes.status, 200);
     const playData = playRes.data;
     assert(playData.url, '应解析出有效的媒体 URL');
@@ -98,7 +100,7 @@ async function runTests() {
     // 6. 验证流式边下边解边播代理与 Range 分片支持
     console.log('▶ [6/7] 验证流媒体解密代理服务 (GET /api/stream/:vid)...');
     // 6.1 HEAD 请求验证
-    const headRes = await axios.head(`${BASE_URL}/api/stream/${ep4.vid}`);
+    const headRes = await client.head(`${BASE_URL}/api/stream/${ep4.vid}`);
     assert.strictEqual(headRes.status, 200);
     assert.strictEqual(headRes.headers['content-type'], 'video/mp4');
     assert.strictEqual(headRes.headers['accept-ranges'], 'bytes');
@@ -106,7 +108,7 @@ async function runTests() {
     assert(totalBytes > 1024 * 1024, '解密后的 MP4 体积应大于 1MB');
 
     // 6.2 Range 分片请求验证 (bytes=0-1023)
-    const rangeRes = await axios.get(`${BASE_URL}/api/stream/${ep4.vid}`, {
+    const rangeRes = await client.get(`${BASE_URL}/api/stream/${ep4.vid}`, {
       headers: { Range: 'bytes=0-1023' },
       responseType: 'arraybuffer'
     });
@@ -134,26 +136,27 @@ async function runTests() {
       position_sec: 45.5,
       duration_sec: 152.0
     };
-    const saveProgRes = await axios.post(`${BASE_URL}/api/progress`, progressPayload);
+    const saveProgRes = await client.post(`${BASE_URL}/api/progress`, progressPayload);
     assert.strictEqual(saveProgRes.status, 200);
 
-    const historyRes = await axios.get(`${BASE_URL}/api/history`);
+    const historyRes = await client.get(`${BASE_URL}/api/history`);
     const histItem = (historyRes.data || []).find(h => h.series_id === seriesId);
     assert(histItem, '观影历史中应查到刚刚观看的短剧');
     assert.strictEqual(histItem.episode_index, 4);
     assert.strictEqual(histItem.position_sec, 45.5);
 
+    const favoritePayload = { series_id: seriesId, series_title: seriesData.series_title, cover: seriesData.cover, episode_count: seriesData.total };
     // 收藏切换验证 (保证测试幂等性)
-    const initialFavRes = await axios.get(`${BASE_URL}/api/favorites`);
+    const initialFavRes = await client.get(`${BASE_URL}/api/favorites`);
     const initiallyFav = (initialFavRes.data || []).some(f => f.series_id === seriesId);
     if (initiallyFav) {
-      await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 先取消
+      await client.post(`${BASE_URL}/api/favorites/toggle`, favoritePayload); // 先取消
     }
-    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 重新收藏
+    const toggleRes = await client.post(`${BASE_URL}/api/favorites/toggle`, favoritePayload); // 重新收藏
     assert.strictEqual(toggleRes.status, 200);
     assert.strictEqual(toggleRes.data.is_favorite, true);
 
-    const favRes = await axios.get(`${BASE_URL}/api/favorites`);
+    const favRes = await client.get(`${BASE_URL}/api/favorites`);
     const isFav = (favRes.data || []).some(f => f.series_id === seriesId);
     assert(isFav, '收藏夹中应包含该短剧');
     console.log(`  ✅ 用户观影进度与收藏数据本地持久化读写校验成功\n`);
