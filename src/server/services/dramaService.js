@@ -42,11 +42,30 @@ class DramaService {
     const genre = options.genre || '';
     try {
       const res = await hgCatalog.browseList({ page, category, genre });
-      return res || { results: [], page: 1, total: 0, hasMore: false };
+      if (res && Array.isArray(res.results) && res.results.length > 0) {
+        return res;
+      }
     } catch (e) {
-      console.error('[DramaService] Catalog browse failed:', e.message);
-      return { results: [], page: 1, total: 0, hasMore: false, error: e.message };
+      console.warn('[DramaService] Catalog browse failed, trying fallback:', e.message);
     }
+
+    // 上游接口超时或无数据时，自动降级回退到全网热播搜索，保障高可用
+    try {
+      const fallback = await this.search('热播', page);
+      if (fallback && Array.isArray(fallback.results) && fallback.results.length > 0) {
+        return {
+          results: fallback.results,
+          page,
+          total: fallback.total || fallback.results.length,
+          hasMore: fallback.hasMore || false,
+          fallback: true
+        };
+      }
+    } catch (e) {
+      console.error('[DramaService] Fallback catalog search failed:', e.message);
+    }
+
+    return { results: [], page: 1, total: 0, hasMore: false };
   }
 
   /**

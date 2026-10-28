@@ -7,7 +7,7 @@ const RANK_API = '/reading/bookapi/bookmall/cell/change/v';
 const CATEGORIES = { 'real-drama': ['default', 'short_play'], 'comic-drama': ['comic_series', 'comic_series'], 'ai-drama': ['ai_series', 'ai_series'] };
 const RANKS = { 'hot-drama': ['all', 'ranklist_hot_play_sc'], 'hot-real-drama': ['human', 'human_hot_play'],
   'hot-comic-drama': ['comic_series_rank', 'comic_series_hot_play'], 'hot-ai-drama': ['ai_playlet', 'ai_playlet_hot_play'] };
-const TIMEOUT_MS = 4000, CACHE_MS = 120000, MAX_SESSIONS = 32, MAX_PAGES = 8;
+const TIMEOUT_MS = 10000, CACHE_MS = 120000, MAX_SESSIONS = 32, MAX_PAGES = 8;
 const sessions = new Map();
 const appError = (message, code = 'APP_SCHEMA') => Object.assign(new Error(message), { code });
 const fail = (error, sourceUrl) => ({ success: false, error: `${error.message}，可重试或切换官网`, code: error.code || 'APP_NETWORK', sourceUrl });

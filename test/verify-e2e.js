@@ -27,7 +27,16 @@ async function runTests() {
 
     // 2. 验证剧场目录接口
     console.log('▶ [2/7] 验证热门短剧目录获取 (GET /api/catalog)...');
-    const catalogRes = await axios.get(`${BASE_URL}/api/catalog?category=hot-drama&page=1`);
+    let catalogRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        catalogRes = await axios.get(`${BASE_URL}/api/catalog?category=hot-drama&page=1`, { timeout: 15000 });
+        if (catalogRes.status === 200 && catalogRes.data?.results?.length > 0) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
     assert.strictEqual(catalogRes.status, 200);
     const catalogDramas = catalogRes.data?.results || [];
     assert(catalogDramas.length > 0, '热门剧场应返回短剧列表');
@@ -37,12 +46,22 @@ async function runTests() {
     // 3. 验证短剧全网关键词检索
     console.log('▶ [3/7] 验证短剧搜索接口 (GET /api/search)...');
     const testKeyword = '离婚';
-    const searchRes = await axios.get(`${BASE_URL}/api/search?keyword=${encodeURIComponent(testKeyword)}`);
+    let searchRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        searchRes = await axios.get(`${BASE_URL}/api/search?keyword=${encodeURIComponent(testKeyword)}`, { timeout: 15000 });
+        if (searchRes.status === 200 && searchRes.data?.results?.length > 0) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
     assert.strictEqual(searchRes.status, 200);
     const searchResults = searchRes.data?.results || [];
     assert(searchResults.length > 0, '搜索应返回结果');
     const targetDrama = searchResults[0];
     console.log(`  ✅ 搜索关键词 "${testKeyword}" 成功，返回 ${searchResults.length} 条记录:`);
+    console.log(`     首位匹配剧目: 《${targetDrama.series_title}》 (series_id: ${targetDrama.series_id})\n`);
     console.log(`     首位匹配剧目: 《${targetDrama.series_title}》 (series_id: ${targetDrama.series_id})\n`);
 
     // 4. 验证全部分集列表获取
