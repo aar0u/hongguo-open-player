@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
-const { startServer } = require('../server/index.js');
 
 // 必须在 app.whenReady 之前注入 Chromium 硬件解码与 macOS VideoToolbox HEVC (H.265) 解码开关
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,PlatformHEVCEncoderSupport');
@@ -13,6 +12,8 @@ let serverInstance = null;
 
 async function createWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
+  process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
+  const { startServer } = require('../server/index.js');
   const res = await startServer(8899);
   serverInstance = res.server;
   const port = res.port;

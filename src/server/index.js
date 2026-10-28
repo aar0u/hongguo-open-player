@@ -38,7 +38,7 @@ app.get('/api/catalog', async (req, res) => {
     const data = await dramaService.catalog({ page, category, genre });
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -51,7 +51,7 @@ app.get('/api/search', async (req, res) => {
     const data = await dramaService.search(keyword, page);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -71,7 +71,7 @@ app.get('/api/series/:seriesId', async (req, res) => {
       is_favorite: isFav
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -85,7 +85,7 @@ app.get('/api/play/:vid', async (req, res) => {
     const playInfo = await dramaService.getPlayInfo(vid, quality);
     res.json(playInfo);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -118,7 +118,7 @@ app.post('/api/progress', (req, res) => {
     const updated = storeService.updateProgress(item);
     res.json({ success: true, progress: updated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -134,7 +134,7 @@ app.post('/api/favorites/toggle', (req, res) => {
     const isFav = storeService.toggleFavorite(req.body);
     res.json({ success: true, is_favorite: isFav });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
