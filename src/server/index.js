@@ -47,6 +47,20 @@ app.use(express.json({ limit: '64kb' }));
 const clientDir = path.join(__dirname, '../client');
 app.use(express.static(clientDir));
 
+function sendApiError(res, error) {
+  const status = error.status >= 400 && error.status < 600 ? error.status : 500;
+  const messages = {
+    DEVICE_REGISTRATION_FAILED: '播放设备注册暂时失败，请稍后重试',
+    ETIMEDOUT: '上游请求超时，请稍后重试',
+    SECURITY_BLOCKED: '视频源地址未通过安全检查',
+    EACCES: '无法访问本地数据目录，请检查写入权限',
+    EPERM: '无法保存本地数据，请稍后重试',
+    EBUSY: '本地数据文件正被占用，请稍后重试'
+  };
+  console.error('[API]', error.code || 'REQUEST_FAILED', error.message);
+  res.status(status).json({ error: status === 400 ? error.message : messages[error.code] || '操作失败，请稍后重试' });
+}
+
 // ================= API 路由 =================
 
 /**
@@ -58,7 +72,7 @@ app.get('/api/catalog', async (req, res) => {
     const data = await dramaService.catalog({ page, category, genre });
     res.json(data);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -71,7 +85,7 @@ app.get('/api/search', async (req, res) => {
     const data = await dramaService.search(keyword, page);
     res.json(data);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -91,7 +105,7 @@ app.get('/api/series/:seriesId', async (req, res) => {
       is_favorite: isFav
     });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -105,7 +119,7 @@ app.get('/api/play/:vid', async (req, res) => {
     const playInfo = await dramaService.getPlayInfo(vid, quality);
     res.json(playInfo);
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -131,7 +145,7 @@ app.post('/api/progress', async (req, res) => {
     const updated = await storeService.updateProgress(item);
     res.json({ success: true, progress: updated });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
@@ -147,11 +161,16 @@ app.post('/api/favorites/toggle', async (req, res) => {
     const isFav = await storeService.toggleFavorite(req.body);
     res.json({ success: true, is_favorite: isFav });
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message });
+    sendApiError(res, err);
   }
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  sendApiError(res, error);
+});
 
 // 前端 SPA 页面兜底
 app.use((req, res) => {

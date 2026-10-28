@@ -27,3 +27,17 @@ test('loopback API blocks foreign origins and hosts and returns JSON errors', as
   assert.equal(typeof (await missing.json()).error, 'string');
   assert.equal((await apiFetch(`${base}/api/progress`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
 });
+
+test('API exceptions do not expose filesystem or upstream request details', async t => {
+  const service = require('../../src/server/services/dramaService');
+  const original = service.getSeriesDetail;
+  service.getSeriesDetail = async () => { throw new Error('secret /private/data/file.json?auth=private'); };
+  t.after(() => { service.getSeriesDetail = original; });
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  const response = await fetch(`${base}/api/series/1`, { headers: { Cookie: home.headers.get('set-cookie').split(';')[0] } });
+  assert.equal(response.status, 500);
+  assert.equal((await response.json()).error, '操作失败，请稍后重试');
+});
