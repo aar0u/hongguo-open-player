@@ -45,11 +45,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px 0 76px; /* 留出 macOS 左上角红绿灯按钮安全间距 */
+  padding: 0 20px 0 20px; /* Windows / Linux / 浏览器标准对称边距 */
   position: sticky;
   top: 0;
   z-index: 100;
   -webkit-app-region: drag; /* 允许通过顶栏拖拽原生窗口 */
+}
+
+/* 仅在 macOS 原生应用下，为左上角系统胶囊红绿灯留出 76px 安全边距 */
+html.platform-mac .app-header {
+  padding-left: 76px;
 }
 
 /* 交互元素恢复可点击与输入 */

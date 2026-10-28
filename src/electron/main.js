@@ -17,16 +17,16 @@ async function createWindow() {
   serverInstance = res.server;
   const port = res.port;
 
-  // 2. 创建原生 macOS 窗口
-  mainWindow = new BrowserWindow({
+  // 2. 创建原生跨平台桌面窗口 (macOS / Windows / Linux)
+  const isMac = process.platform === 'darwin';
+  const windowOptions = {
     width: 1280,
     height: 840,
     minWidth: 960,
     minHeight: 640,
     title: '红果开放播放器',
-    titleBarStyle: 'hiddenInset', // 优雅的 macOS 胶囊红绿灯一体化标题栏
-    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: '#0f1015',
+    autoHideMenuBar: !isMac, // Windows 下默认隐藏传统菜单栏，保持纯粹现代深色观影质感 (按 Alt 唤出)
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -34,7 +34,17 @@ async function createWindow() {
       devTools: true
     },
     show: false // 待内容准备完毕后再优雅显示，避免白屏
-  });
+  };
+
+  if (isMac) {
+    windowOptions.titleBarStyle = 'hiddenInset'; // 优雅的 macOS 胶囊红绿灯一体化标题栏
+    windowOptions.trafficLightPosition = { x: 16, y: 16 };
+  } else {
+    // Windows 平台专属配置
+    windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
+  }
+
+  mainWindow = new BrowserWindow(windowOptions);
 
   // 3. 加载本地应用页面
   const appUrl = `http://127.0.0.1:${port}`;

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const { createApp, ref, computed, onMounted, onUnmounted, nextTick } = Vue;
 
+// 自动识别 macOS / Windows / Linux 宿主平台并注入 root class
+const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.userAgentData && navigator.userAgentData.platform === 'macOS');
+document.documentElement.classList.add(isMac ? 'platform-mac' : 'platform-win');
+
 createApp({
   setup() {
     // 视图模式与导航状态

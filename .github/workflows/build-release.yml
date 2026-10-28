@@ -12,15 +12,49 @@ permissions:
   contents: write
 
 jobs:
-  build-macos:
-    name: Build Native macOS App (Apple Silicon & Intel)
-    runs-on: macos-latest
-
+  prep:
+    name: Prepare Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      raw_version: ${{ steps.version.outputs.raw_version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            RAW_VER="${GITHUB_REF#refs/tags/v}"
+          else
+            RAW_VER="1.0.${{ github.run_number }}"
+          fi
+          echo "tag=v${RAW_VER}" >> $GITHUB_OUTPUT
+          echo "raw_version=${RAW_VER}" >> $GITHUB_OUTPUT
+          echo "Computed release version: ${RAW_VER} (tag: v${RAW_VER})"
+
+  build:
+    name: Build Native Apps (${{ matrix.platform }})
+    needs: prep
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            build_cmd: npm run build:mac
+          - os: windows-latest
+            platform: windows
+            build_cmd: npm run build:win
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Node.js (22.x)
         uses: actions/setup-node@v4
@@ -31,58 +65,76 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package version
+        shell: bash
+        run: |
+          npm version "${{ needs.prep.outputs.raw_version }}" --no-git-tag-version --allow-same-version
+
       - name: Run verification test
         run: npm test
 
-      - name: Compute release version & sync package version
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            RAW_VER="${GITHUB_REF#refs/tags/v}"
-          else
-            RAW_VER="1.0.${{ github.run_number }}"
-          fi
-          echo "tag=v${RAW_VER}" >> $GITHUB_OUTPUT
-          echo "Building native macOS release: v${RAW_VER}"
-          npm version "${RAW_VER}" --no-git-tag-version --allow-same-version
+      - name: Build platform packages
+        run: ${{ matrix.build_cmd }}
 
-      - name: Build macOS DMG and ZIP packages
-        run: |
-          npm run build:mac
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.platform }}
+          path: |
+            dist-electron/*.dmg
+            dist-electron/*.exe
+            dist-electron/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Create or Update GitHub Release
+    needs: [prep, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Compute SHA256 Checksums
         shell: bash
         run: |
-          cd dist-electron
-          shasum -a 256 *.dmg *.zip > SHA256SUMS.txt
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create or Update GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "红果开放播放器 macOS 原生桌面版 ${{ steps.version.outputs.tag }}"
+          tag_name: ${{ needs.prep.outputs.tag }}
+          name: "红果开放播放器 多平台原生桌面版 ${{ needs.prep.outputs.tag }}"
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            ### 🍎 红果开放播放器 macOS 原生桌面版 ${{ steps.version.outputs.tag }}
+            ### 🎬 红果开放播放器 多平台原生桌面版 ${{ needs.prep.outputs.tag }}
 
-            本版本为专为 macOS 打造的原生桌面应用，开箱即用，无需打开任何网页浏览器。
+            专为 macOS 与 Windows 平台打造的原生多端桌面应用，开箱即用，无需打开任何网页浏览器。
 
             #### ✨ 核心特性：
-            - 🖥️ **macOS 原生独立应用**：支持 Apple Silicon (M1/M2/M3/M4) 与 Intel 架构；
+            - 🖥️ **macOS & Windows 原生双平台**：macOS (Apple Silicon & Intel) + Windows (x64) 全面覆盖；
             - 🍿 **全集免费秒播**：免手机登录，突破网页试看限制，整部 80~100+ 集无缝畅播；
-            - ⚡ **MP4 CENC 实时流式解密**：原生级内存实时解密，极速起播与无感下一集预加载；
+            - ⚡ **MP4 CENC 实时流式解密**：原生级内存实时解密与 8 路并发 Range 下载加速，极速起播；
             - 🎬 **沉浸式竖屏影院**：专为短剧定制的 9:16 沉浸比例，键盘 ↑/↓ 秒切集数，空格暂停，左右快进；
             - 💾 **观影进度记忆**：自动记录各剧集播放进度，支持剧目收藏与分类检索。
 
             #### 📥 下载安装方式：
-            - **Apple Silicon (M1/M2/M3/M4 芯片)**：下载 `红果开放播放器-*-arm64.dmg`，双击后将图标拖入 `Applications` 文件夹即可直接启动。
-            - **Intel 芯片**：下载 `红果开放播放器-*.dmg` (或包含 x64 字样)，双击拖入 `Applications` 即可。
-            - **绿色便携 ZIP**：也可直接下载 `*-mac.zip` 解压后直接运行 `红果开放播放器.app`。
+            - **Windows (x64)**：
+              - 安装版：下载 `红果开放播放器-Setup-*.exe`（或包含 Setup 字样），双击根据向导安装。
+              - 免安装便携版：下载 `红果开放播放器-*-win.zip`，解压后双击 `红果开放播放器.exe` 直接运行。
+            - **macOS (Apple Silicon M1/M2/M3/M4)**：
+              - 下载 `红果开放播放器-*-arm64.dmg`，双击拖入 `Applications` 即可。
+            - **macOS (Intel x64)**：
+              - 下载 `红果开放播放器-*.dmg`，双击拖入 `Applications` 即可。
           files: |
-            dist-electron/*.dmg
-            dist-electron/*.zip
-            dist-electron/SHA256SUMS.txt
+            release-assets/*

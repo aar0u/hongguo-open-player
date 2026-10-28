@@ -10,7 +10,9 @@
     "build:mac": "electron-builder --mac --arm64 --x64",
     "build:mac:arm64": "electron-builder --mac --arm64",
     "build:mac:x64": "electron-builder --mac --x64",
-    "build:mac:dir": "electron-builder --mac --dir"
+    "build:mac:dir": "electron-builder --mac --dir",
+    "build:win": "electron-builder --win --x64",
+    "build:all": "electron-builder --mac --arm64 --x64 --win --x64"
   },
   "build": {
     "appId": "com.zfdang.hongguo.openplayer",
@@ -63,6 +65,36 @@
         "width": 540,
         "height": 380
       }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "红果开放播放器"
     },
     "files": [
       "src/**/*",
