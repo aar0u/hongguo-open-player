@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const assert = require('assert');
 const axios = require('axios');
-const { app, server } = require('../src/server/index.js');
-
-const BASE_URL = 'http://127.0.0.1:8899';
+const { startServer } = require('../src/server/index.js');
 
 async function runTests() {
   console.log('\n======================================================');
   console.log('🧪 开始红果短剧全链路自动化端到端测试 (E2E Verification)');
   console.log('======================================================\n');
 
+  let serverInstance = null;
   try {
+    const { server, port } = await startServer(8899);
+    serverInstance = server;
+    const BASE_URL = `http://127.0.0.1:${port}`;
     // 1. 验证静态前端资源服务
     console.log('▶ [1/7] 验证静态前端资源交付...');
     const htmlRes = await axios.get(`${BASE_URL}/`);
@@ -117,9 +119,16 @@ async function runTests() {
     assert.strictEqual(histItem.episode_index, 4);
     assert.strictEqual(histItem.position_sec, 45.5);
 
-    // 收藏切换验证
-    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData);
+    // 收藏切换验证 (保证测试幂等性)
+    const initialFavRes = await axios.get(`${BASE_URL}/api/favorites`);
+    const initiallyFav = (initialFavRes.data || []).some(f => f.series_id === seriesId);
+    if (initiallyFav) {
+      await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 先取消
+    }
+    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData); // 重新收藏
     assert.strictEqual(toggleRes.status, 200);
+    assert.strictEqual(toggleRes.data.is_favorite, true);
+
     const favRes = await axios.get(`${BASE_URL}/api/favorites`);
     const isFav = (favRes.data || []).some(f => f.series_id === seriesId);
     assert(isFav, '收藏夹中应包含该短剧');
@@ -132,9 +141,10 @@ async function runTests() {
     console.error('\n❌ 测试失败:', err);
     process.exitCode = 1;
   } finally {
-    server.close();
+    if (serverInstance) {
+      serverInstance.close();
+    }
   }
 }
 
-// 延迟 300ms 待 HTTP 端口就绪后执行
-setTimeout(runTests, 300);
+runTests();

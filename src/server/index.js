@@ -141,13 +141,41 @@ app.use((req, res) => {
   res.sendFile(path.join(clientDir, 'index.html'));
 });
 
-// 启动本地服务
-const server = app.listen(PORT, '127.0.0.1', () => {
-  console.log(`====================================================`);
-  console.log(`🚀 红果短剧桌面播放器服务已启动!`);
-  console.log(`📍 本地访问地址: http://127.0.0.1:${PORT}`);
-  console.log(`🎬 具备 MP4 CENC 实时流式解密代理与全集无感预加载功能`);
-  console.log(`====================================================`);
-});
+// 启动服务函数封装
+function startServer(preferredPort = PORT) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(preferredPort, '127.0.0.1', () => {
+      const actualPort = server.address().port;
+      console.log(`====================================================`);
+      console.log(`🚀 红果短剧桌面播放器服务已启动!`);
+      console.log(`📍 本地访问地址: http://127.0.0.1:${actualPort}`);
+      console.log(`🎬 具备 MP4 CENC 实时流式解密代理与全集无感预加载功能`);
+      console.log(`====================================================`);
+      resolve({ app, server, port: actualPort });
+    });
 
-module.exports = { app, server };
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`端口 ${preferredPort} 已被占用，尝试使用动态空闲端口...`);
+        const fallbackServer = app.listen(0, '127.0.0.1', () => {
+          const actualPort = fallbackServer.address().port;
+          console.log(`🚀 服务已启动在空闲端口: http://127.0.0.1:${actualPort}`);
+          resolve({ app, server: fallbackServer, port: actualPort });
+        });
+        fallbackServer.on('error', reject);
+      } else {
+        reject(err);
+      }
+    });
+  });
+}
+
+// CLI 直接运行模式
+if (require.main === module) {
+  startServer().catch((err) => {
+    console.error('启动服务失败:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { app, startServer };
