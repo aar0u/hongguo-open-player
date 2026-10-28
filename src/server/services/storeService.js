@@ -3,12 +3,12 @@ const fs = require('fs');
 const path = require('path');
 
 class StoreService {
-  constructor() {
-    this.dataDir = path.join(__dirname, '../../../data');
+  constructor(dataDir = process.env.HONGGUO_DATA_DIR || path.join(__dirname, '../../../data')) {
+    this.dataDir = dataDir;
     this.dataFile = path.join(this.dataDir, 'user_data.json');
     this.state = {
-      history: {}, // series_id -> { series_id, series_title, cover, episode_index, vid, position_sec, duration_sec, updated_at }
-      favorites: {} // series_id -> { series_id, series_title, cover, updated_at }
+      history: Object.create(null), // series_id -> { series_id, series_title, cover, episode_index, vid, position_sec, duration_sec, updated_at }
+      favorites: Object.create(null) // series_id -> { series_id, series_title, cover, updated_at }
     };
     this.init();
   }
@@ -22,8 +22,12 @@ class StoreService {
         const raw = fs.readFileSync(this.dataFile, 'utf8');
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
-          this.state.history = parsed.history || {};
-          this.state.favorites = parsed.favorites || {};
+          for (const field of ['history', 'favorites']) {
+            const entries = parsed[field];
+            if (entries && typeof entries === 'object' && !Array.isArray(entries)) {
+              this.state[field] = Object.assign(Object.create(null), entries);
+            }
+          }
         }
       }
     } catch (e) {
@@ -31,14 +35,21 @@ class StoreService {
     }
   }
 
-  save() {
+  save(nextState) {
+    fs.mkdirSync(this.dataDir, { recursive: true });
+    const tempFile = `${this.dataFile}.tmp`;
     try {
-      if (!fs.existsSync(this.dataDir)) {
-        fs.mkdirSync(this.dataDir, { recursive: true });
-      }
-      fs.writeFileSync(this.dataFile, JSON.stringify(this.state, null, 2), 'utf8');
-    } catch (e) {
-      console.error('[StoreService] 写入用户数据失败:', e.message);
+      fs.writeFileSync(tempFile, JSON.stringify(nextState, null, 2), { encoding: 'utf8', mode: 0o600 });
+      fs.renameSync(tempFile, this.dataFile);
+      this.state = nextState;
+    } finally {
+      if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+    }
+  }
+
+  validateSeries(item) {
+    if (!item || typeof item.series_id !== 'string' || !/^\d{1,30}$/.test(item.series_id)) {
+      throw Object.assign(new Error('无效的 series_id'), { status: 400 });
     }
   }
 
@@ -46,9 +57,15 @@ class StoreService {
    * 记录/更新播放进度
    */
   updateProgress(item) {
-    if (!item || !item.series_id) return;
+    this.validateSeries(item);
+    for (const field of ['episode_index', 'position_sec', 'duration_sec']) {
+      const value = item[field];
+      if (value !== undefined && (!Number.isFinite(value) || value < 0 || (field === 'episode_index' && (!Number.isInteger(value) || value < 1)))) {
+        throw Object.assign(new Error(`无效的 ${field}`), { status: 400 });
+      }
+    }
     const sid = String(item.series_id);
-    this.state.history[sid] = {
+    const progress = {
       series_id: sid,
       series_title: item.series_title || '',
       cover: item.cover || '',
@@ -58,8 +75,8 @@ class StoreService {
       duration_sec: Number(item.duration_sec) || 0,
       updated_at: Date.now()
     };
-    this.save();
-    return this.state.history[sid];
+    this.save({ ...this.state, history: { ...this.state.history, [sid]: progress } });
+    return progress;
   }
 
   /**
@@ -74,28 +91,29 @@ class StoreService {
    */
   getSeriesProgress(seriesId) {
     if (!seriesId) return null;
-    return this.state.history[String(seriesId)] || null;
+    return Object.hasOwn(this.state.history, String(seriesId)) ? this.state.history[String(seriesId)] : null;
   }
 
   /**
    * 切换收藏状态
    */
   toggleFavorite(series) {
-    if (!series || !series.series_id) return false;
+    this.validateSeries(series);
     const sid = String(series.series_id);
-    if (this.state.favorites[sid]) {
-      delete this.state.favorites[sid];
-      this.save();
+    const favorites = { ...this.state.favorites };
+    if (Object.hasOwn(favorites, sid)) {
+      delete favorites[sid];
+      this.save({ ...this.state, favorites });
       return false; // 取消收藏
     } else {
-      this.state.favorites[sid] = {
+      favorites[sid] = {
         series_id: sid,
         series_title: series.series_title || '',
         cover: series.cover || '',
         episode_count: series.episode_count || series.total || 0,
         updated_at: Date.now()
       };
-      this.save();
+      this.save({ ...this.state, favorites });
       return true; // 已收藏
     }
   }
@@ -111,7 +129,7 @@ class StoreService {
    * 判断单剧是否已收藏
    */
   isFavorite(seriesId) {
-    return !!this.state.favorites[String(seriesId)];
+    return Object.hasOwn(this.state.favorites, String(seriesId));
   }
 }
 

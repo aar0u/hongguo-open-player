@@ -35,6 +35,7 @@
 * [🔍 参考项目架构解析：hongguo-player](docs/hongguo-player-architecture.md)
 * [🔍 参考项目架构解析：hongguo-drama](docs/hongguo-drama-architecture.md)
 * [🧪 真机接口验证与方案报告](docs/验证与实现方案.md)
+* [代码审查与修复报告（2026-10-28）](docs/code-review-2026-10-28.md)
 
 ---
 

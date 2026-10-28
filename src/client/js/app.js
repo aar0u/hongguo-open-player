@@ -39,6 +39,8 @@ createApp({
     const watchedMap = ref(new Map()); // seriesId -> Set(epIndexes)
     let progressTimer = null;
     let pendingResumeSec = 0;
+    let progressReady = false;
+    let theaterRequest = 0;
 
     // 当前选集分组
     const currentGroup = ref({ start: 1, end: 30 });
@@ -120,7 +122,7 @@ createApp({
       if (!searchKeyword.value.trim()) return;
       submittedKeyword = searchKeyword.value.trim();
       currentPage.value = 1;
-      viewMode.value = 'catalog';
+      leaveTheater();
       return loadCatalog();
     }
 
@@ -132,7 +134,7 @@ createApp({
     function switchTab(tab) {
       currentTab.value = tab;
       currentPage.value = 1;
-      viewMode.value = 'catalog';
+      leaveTheater();
       searchKeyword.value = '';
       submittedKeyword = '';
       loadCatalog();
@@ -149,16 +151,38 @@ createApp({
 
     // ================= 沉浸式剧场与播放逻辑 =================
 
+    function resetPlayback() {
+      progressReady = false;
+      pendingResumeSec = 0;
+      currentTime.value = 0;
+      duration.value = 0;
+      bufferedPercent.value = 0;
+      isPlaying.value = false;
+    }
+
+    function leaveTheater() {
+      theaterRequest++;
+      saveProgressNow();
+      if (videoEl.value) videoEl.value.pause();
+      resetPlayback();
+      viewMode.value = 'catalog';
+    }
+
     async function openTheater(drama) {
+      const request = ++theaterRequest;
       videoErrorMessage.value = '';
       isBuffering.value = true;
       try {
-        const detail = await fetch(`/api/series/${drama.series_id}`).then(r => r.json());
+        const detail = await fetch(`/api/series/${encodeURIComponent(drama.series_id)}`).then(r => r.json());
+        if (request !== theaterRequest) return;
         if (!detail || !detail.episodes || detail.episodes.length === 0) {
           alert('获取该短剧分集失败，请重试');
           return;
         }
 
+        saveProgressNow();
+        if (videoEl.value) videoEl.value.pause();
+        resetPlayback();
         activeSeries.value = detail;
         activeEpisodes.value = detail.episodes;
         isFavorited.value = !!detail.is_favorite;
@@ -168,13 +192,17 @@ createApp({
         currentGroup.value = groups[0] || { start: 1, end: 30 };
 
         // 默认恢复上次观看进度或第一集
-        let targetIndex = 1;
+        let targetIndex = detail.episodes[0].vid_index;
         let resumeSec = 0;
         if (detail.saved_progress) {
           targetIndex = Number(detail.saved_progress.episode_index) || 1;
           resumeSec = Number(detail.saved_progress.position_sec) || 0;
         }
 
+        if (!detail.episodes.some(ep => ep.vid_index === targetIndex)) {
+          targetIndex = detail.episodes[0].vid_index;
+          resumeSec = 0;
+        }
         activeEpisodeIndex.value = targetIndex;
         // 定位所属分组
         const matchedGroup = groups.find(g => targetIndex >= g.start && targetIndex <= g.end);
@@ -191,25 +219,23 @@ createApp({
           });
         }
       } catch (err) {
+        if (request !== theaterRequest) return;
         console.error('打开剧场失败:', err);
         alert('加载剧集失败: ' + err.message);
       } finally {
-        isBuffering.value = false;
+        if (request === theaterRequest) isBuffering.value = false;
       }
     }
 
     function closeTheater() {
-      saveProgressNow();
-      if (videoEl.value) {
-        videoEl.value.pause();
-      }
-      viewMode.value = 'catalog';
+      leaveTheater();
       loadCatalog();
     }
 
     function switchEpisode(ep) {
       if (activeEpisodeIndex.value === ep.vid_index) return;
       saveProgressNow();
+      resetPlayback();
       videoErrorMessage.value = '';
       isBuffering.value = true;
       activeEpisodeIndex.value = ep.vid_index;
@@ -313,29 +339,30 @@ createApp({
 
     // ================= 播放器事件回调 =================
 
-    function onPlay() {
+    function onPlay(event) {
+      if (event && event.target !== videoEl.value) return;
       isPlaying.value = true;
       isBuffering.value = false;
     }
 
-    function onCanPlay() {
+    function onCanPlay(event) {
+      if (event && event.target !== videoEl.value) return;
       isBuffering.value = false;
-      if (videoEl.value && videoEl.value.paused) {
-        videoEl.value.play().catch(e => {
-          console.log('[Player] 自动播放需交互:', e.message);
-          isBuffering.value = false;
-        });
-      }
     }
 
-    function onPause() {
+    function onPause(event) {
+      if (event && event.target !== videoEl.value) return;
       isPlaying.value = false;
       saveProgressNow();
     }
 
-    function onLoadedMetadata() {
+    function onLoadedMetadata(event) {
+      if (event && event.target !== videoEl.value) return;
       if (videoEl.value) {
+        progressReady = true;
         duration.value = videoEl.value.duration || 0;
+        videoEl.value.volume = Number(volume.value);
+        videoEl.value.muted = isMuted.value;
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
         if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
           try {
@@ -343,12 +370,13 @@ createApp({
           } catch (e) {
             console.warn('恢复历史播放位置失败:', e);
           }
-          pendingResumeSec = 0;
         }
+        pendingResumeSec = 0;
       }
     }
 
-    function onTimeUpdate() {
+    function onTimeUpdate(event) {
+      if (event && event.target !== videoEl.value) return;
       if (videoEl.value) {
         currentTime.value = videoEl.value.currentTime || 0;
         // 计算缓冲进度
@@ -359,7 +387,8 @@ createApp({
       }
     }
 
-    function onEnded() {
+    function onEnded(event) {
+      if (event && event.target !== videoEl.value) return;
       console.log('[Player] 本集播放完成，正在无感自动切入下一集...');
       playNextEpisode();
     }
@@ -403,9 +432,10 @@ createApp({
     }
 
     function saveProgressNow() {
-      if (!activeSeries.value || !currentTime.value) return;
+      if (!activeSeries.value || !progressReady || viewMode.value !== 'theater') return;
       const curEp = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value);
       fetch('/api/progress', {
+        keepalive: true,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -457,6 +487,7 @@ createApp({
     onMounted(() => {
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('pagehide', saveProgressNow);
       // 定时每 4 秒静默上报进度
       progressTimer = setInterval(() => {
         if (viewMode.value === 'theater' && isPlaying.value) {
@@ -467,6 +498,7 @@ createApp({
 
     onUnmounted(() => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pagehide', saveProgressNow);
       if (progressTimer) clearInterval(progressTimer);
     });
 

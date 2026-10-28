@@ -7,9 +7,11 @@ class StreamService {
   constructor() {
     // 内存 LRU 缓存：vid -> { buffer, size, timestamp }
     this.cache = new Map();
+    this.maxCacheBytes = 128 * 1024 * 1024;
     this.maxCacheCount = 15; // 保持最近播放的 15 集，约 100MB 内存占用
     // 正在下载解密中的 Promise 映射，避免并发 Range 请求重复下载
     this.inFlight = new Map();
+    this.prefetchTimers = new Map();
   }
 
   /**
@@ -26,23 +28,25 @@ class StreamService {
       const probe = await axios.get(url, {
         headers: { ...headers, Range: 'bytes=0-0' },
         timeout: 4000,
+        responseType: 'arraybuffer',
+        maxContentLength: 64 * 1024 * 1024,
         signal
       });
 
       const rangeHeader = probe.headers['content-range'];
       if (!rangeHeader) {
-        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
-        return Buffer.from(full.data);
+        if (probe.status === 200) return Buffer.from(probe.data);
+        throw new Error('Invalid range probe');
       }
 
       const total = parseInt(rangeHeader.split('/')[1], 10);
-      if (isNaN(total) || total <= 0) {
-        const full = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
-        return Buffer.from(full.data);
+      if (!Number.isSafeInteger(total) || total <= 0 || total > 64 * 1024 * 1024) {
+        if (probe.status === 200) return Buffer.from(probe.data);
+        throw new Error('Invalid range probe');
       }
 
       // 并发 6~8 个连接分段下载
-      const concurrency = Math.min(8, Math.max(4, Math.ceil(total / (1024 * 1024))));
+      const concurrency = Math.min(total, 8, Math.max(4, Math.ceil(total / (1024 * 1024))));
       const chunkSize = Math.ceil(total / concurrency);
       const tasks = [];
 
@@ -53,9 +57,16 @@ class StreamService {
           axios.get(url, {
             responseType: 'arraybuffer',
             headers: { ...headers, Range: `bytes=${start}-${end}` },
+            maxContentLength: 64 * 1024 * 1024,
             timeout: timeoutMs,
             signal
-          }).then(r => Buffer.from(r.data))
+          }).then(r => {
+            const chunk = Buffer.from(r.data);
+            if (r.status !== 206 || r.headers['content-range'] !== `bytes ${start}-${end}/${total}` || chunk.length !== end - start + 1) {
+              throw new Error('Invalid media range response');
+            }
+            return chunk;
+          })
         );
       }
 
@@ -64,7 +75,7 @@ class StreamService {
     } catch (e) {
       if (signal && signal.aborted) throw e;
       // 兜底降级为普通全量下载
-      const fallback = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, signal });
+      const fallback = await axios.get(url, { responseType: 'arraybuffer', headers, timeout: timeoutMs, maxContentLength: 64 * 1024 * 1024, signal });
       return Buffer.from(fallback.data);
     }
   }
@@ -97,37 +108,35 @@ class StreamService {
     }
 
     return await new Promise((resolve, reject) => {
-      let resolved = false;
-      let finishedCount = 0;
-      let lastErr = null;
-
-      const run = (idx) => {
-        fetchOne(sorted[idx], idx).then(result => {
-          if (!resolved) {
-            resolved = true;
-            // 中止其他并发连接
-            abortControllers.forEach((c, i) => { if (i !== idx) try { c.abort(); } catch (e) {} });
-            resolve(result);
-          }
-        }).catch(err => {
-          lastErr = err;
-          finishedCount++;
-          if (finishedCount === sorted.length && !resolved) {
-            reject(lastErr || new Error('所有视频源拉取均失败'));
+      let settled = false;
+      let next = 0;
+      let failures = 0;
+      let timer;
+      const launch = () => {
+        if (settled || next >= sorted.length) return;
+        const index = next++;
+        clearTimeout(timer);
+        if (next < sorted.length) timer = setTimeout(launch, 1200);
+        fetchOne(sorted[index], index).then(result => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          abortControllers.forEach((controller, i) => { if (i !== index) controller.abort(); });
+          resolve(result);
+        }).catch(error => {
+          if (settled) return;
+          failures++;
+          if (failures === sorted.length) {
+            settled = true;
+            clearTimeout(timer);
+            reject(error);
+          } else {
+            // A failed source should not delay the next available candidate.
+            launch();
           }
         });
       };
-
-      // 启动首选节点
-      run(0);
-
-      // 若 1.2 秒内首选未返回，启动备用源并发竞速
-      setTimeout(() => {
-        if (!resolved && sorted.length > 1) {
-          console.log(`[StreamService] 首选视频源拉取耗时超 1.2s，启动备用源并发竞速: ${new URL(sorted[1].url).hostname}`);
-          run(1);
-        }
-      }, 1200);
+      launch();
     });
   }
 
@@ -135,7 +144,8 @@ class StreamService {
    * 获取或解密得到指定 vid 的明文 MP4 Buffer
    */
   async getDecryptedBuffer(vid, quality = 'auto') {
-    const key = String(vid);
+    const videoId = String(vid);
+    const key = `${videoId}:${quality}`;
     // 1. 命中内存缓存
     if (this.cache.has(key)) {
       const entry = this.cache.get(key);
@@ -151,7 +161,7 @@ class StreamService {
     const task = (async () => {
       try {
         console.log(`[StreamService] 正在解析视频播放地址 vid: ${key}`);
-        const playInfo = await appSource.fetchAppPlayUrl(key, { quality, allowLowerQuality: true });
+        const playInfo = await appSource.fetchAppPlayUrl(videoId, { quality, allowLowerQuality: true });
         if (!playInfo || !playInfo.url) {
           throw new Error('未获取到有效的视频流链接');
         }
@@ -188,31 +198,45 @@ class StreamService {
   /**
    * 预加载下一集 (Prefetch)
    */
-  prefetch(vid, quality = '1080p') {
-    if (!vid) return;
-    const key = String(vid);
-    if (this.cache.has(key) || this.inFlight.has(key)) return;
-    this.getDecryptedBuffer(key, quality).catch(err => {
-      console.warn(`[StreamService] 预加载分集 ${key} 失败:`, err.message);
-    });
+  prefetch(vid, quality = 'auto') {
+    if (!vid || !/^\d{1,30}$/.test(String(vid))) return;
+    const key = `${vid}:${quality}`;
+    if (this.cache.has(key) || this.inFlight.has(key) || this.prefetchTimers.has(key)) return;
+    // Range and HEAD probes must not create a timer for every browser request.
+    if (this.prefetchTimers.size >= 2) {
+      const oldest = this.prefetchTimers.keys().next().value;
+      clearTimeout(this.prefetchTimers.get(oldest));
+      this.prefetchTimers.delete(oldest);
+    }
+    const timer = setTimeout(() => {
+      this.prefetchTimers.delete(key);
+      this.getDecryptedBuffer(vid, quality).catch(err => {
+        console.warn(`[StreamService] 预加载分集 ${vid} 失败:`, err.message);
+      });
+    }, 4000);
+    timer.unref?.();
+    this.prefetchTimers.set(key, timer);
   }
 
   /**
    * LRU 缓存修剪
    */
   pruneCache() {
-    if (this.cache.size <= this.maxCacheCount) return;
-    let oldestKey = null;
-    let oldestTime = Infinity;
-    for (const [k, v] of this.cache.entries()) {
-      if (v.timestamp < oldestTime) {
-        oldestTime = v.timestamp;
-        oldestKey = k;
+    let bytes = [...this.cache.values()].reduce((sum, entry) => sum + entry.size, 0);
+    while (this.cache.size > this.maxCacheCount || bytes > this.maxCacheBytes) {
+      let oldestKey = null;
+      let oldestTime = Infinity;
+      for (const [k, v] of this.cache.entries()) {
+        if (v.timestamp < oldestTime) {
+          oldestTime = v.timestamp;
+          oldestKey = k;
+        }
       }
-    }
-    if (oldestKey) {
-      console.log(`[StreamService] LRU 释放旧分集缓存: ${oldestKey}`);
-      this.cache.delete(oldestKey);
+      if (oldestKey) {
+        console.log(`[StreamService] LRU 释放旧分集缓存: ${oldestKey}`);
+        bytes -= this.cache.get(oldestKey).size;
+        this.cache.delete(oldestKey);
+      } else break;
     }
   }
 
@@ -222,6 +246,7 @@ class StreamService {
   async handleStream(req, res, vid) {
     try {
       const buffer = await this.getDecryptedBuffer(vid);
+      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid);
       const total = buffer.length;
       const range = req.headers.range;
 
@@ -238,17 +263,24 @@ class StreamService {
       }
 
       // 解析 Range 头，例如 "bytes=0-1048575"
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      let end = parts[1] ? parseInt(parts[1], 10) : total - 1;
-
-      if (isNaN(start) || isNaN(end) || start > end || start >= total) {
-        res.writeHead(416, {
-          'Content-Range': `bytes */${total}`
-        });
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      let start = NaN, end = NaN;
+      if (match && (match[1] || match[2])) {
+        if (!match[1]) {
+          const suffix = Number(match[2]);
+          if (Number.isSafeInteger(suffix) && suffix > 0) {
+            start = Math.max(0, total - suffix);
+            end = total - 1;
+          }
+        } else {
+          start = Number(match[1]);
+          end = match[2] ? Number(match[2]) : total - 1;
+        }
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= total) {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
         return res.end();
       }
-
       end = Math.min(end, total - 1);
       const chunkSize = (end - start) + 1;
 

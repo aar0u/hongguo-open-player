@@ -8,20 +8,17 @@ const storeService = require('./services/storeService');
 const app = express();
 const PORT = process.env.PORT || 8899;
 
-// 中间件配置
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// 跨域支持 (方便本地及各类客户端嵌入)
+// Only the local application's own origin may access personal data or trigger downloads.
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+  const hosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
+  if (!hosts.includes(req.headers.host) ||
+      (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) ||
+      req.headers['sec-fetch-site'] === 'cross-site') {
+    return res.status(403).json({ error: '仅允许本地播放器访问' });
   }
   next();
 });
+app.use(express.json({ limit: '64kb' }));
 
 // 静态前端资源目录
 const clientDir = path.join(__dirname, '../client');
@@ -38,7 +35,7 @@ app.get('/api/catalog', async (req, res) => {
     const data = await dramaService.catalog({ page, category, genre });
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -51,7 +48,7 @@ app.get('/api/search', async (req, res) => {
     const data = await dramaService.search(keyword, page);
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -71,7 +68,7 @@ app.get('/api/series/:seriesId', async (req, res) => {
       is_favorite: isFav
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -85,7 +82,7 @@ app.get('/api/play/:vid', async (req, res) => {
     const playInfo = await dramaService.getPlayInfo(vid, quality);
     res.json(playInfo);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -95,13 +92,6 @@ app.get('/api/play/:vid', async (req, res) => {
  */
 app.get('/api/stream/:vid', (req, res) => {
   const { vid } = req.params;
-  const { next_vid } = req.query;
-  // 延迟 4 秒执行下一集预加载，优先保障当前集起播带宽
-  if (next_vid) {
-    setTimeout(() => {
-      streamService.prefetch(next_vid);
-    }, 4000);
-  }
   streamService.handleStream(req, res, vid);
 });
 
@@ -118,7 +108,7 @@ app.post('/api/progress', (req, res) => {
     const updated = storeService.updateProgress(item);
     res.json({ success: true, progress: updated });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -134,9 +124,11 @@ app.post('/api/favorites/toggle', (req, res) => {
     const isFav = storeService.toggleFavorite(req.body);
     res.json({ success: true, is_favorite: isFav });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
 
 // 前端 SPA 页面兜底
 app.use((req, res) => {

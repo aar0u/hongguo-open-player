@@ -6,17 +6,29 @@ const hgCatalog = require('../native/hongguo-app-catalog');
 const appSource = require('../native/app-source');
 
 class DramaService {
+  constructor() {
+    this.searchSessions = new Map();
+  }
+
   /**
    * 搜索短剧
    */
   async search(keyword, page = 1) {
-    if (!keyword || !keyword.trim()) {
+    if (keyword === undefined || keyword === '') {
       return { results: [], total: 0, page: 1, hasMore: false };
     }
+    if (typeof keyword !== 'string' || keyword.trim().length > 80) {
+      throw Object.assign(new Error('搜索词需为 1 至 80 字的文本'), { status: 400 });
+    }
+    page = Number(page);
+    if (!Number.isInteger(page) || page < 1 || page > 50) {
+      throw Object.assign(new Error('页码需为 1 至 50 的整数'), { status: 400 });
+    }
     const cleanKw = keyword.trim();
+    if (!cleanKw) return { results: [], total: 0, page, hasMore: false };
     try {
-      const res = await hgSearch.searchHongguo(cleanKw, page);
-      if (res && Array.isArray(res.results) && res.results.length > 0) {
+      const res = await hgSearch.searchHongguo(cleanKw, { page });
+      if (res && Array.isArray(res.results) && res.success !== false) {
         return res;
       }
     } catch (e) {
@@ -25,7 +37,15 @@ class DramaService {
 
     // 回退到 App 端搜索
     try {
-      const appRes = await hgAppSearch.searchApp(cleanKw, page);
+      let session = this.searchSessions.get(cleanKw);
+      if (page === 1 || !session || session.expires <= Date.now()) {
+        session = { expires: Date.now() + 120000, cursors: new Map() };
+        this.searchSessions.delete(cleanKw);
+        this.searchSessions.set(cleanKw, session);
+        if (this.searchSessions.size > 30) this.searchSessions.delete(this.searchSessions.keys().next().value);
+      }
+      const appRes = await hgAppSearch.searchApp(cleanKw, { page, cursor: session.cursors.get(page) });
+      if (appRes?.hasMore && appRes.cursor) session.cursors.set(page + 1, appRes.cursor);
       return appRes || { results: [], total: 0, page: 1, hasMore: false };
     } catch (e) {
       console.error('[DramaService] App search failed:', e.message);
@@ -42,14 +62,17 @@ class DramaService {
     const genre = options.genre || '';
     try {
       const res = await hgCatalog.browseList({ page, category, genre });
-      if (res && Array.isArray(res.results) && res.results.length > 0) {
+      if (res && res.success !== false && Array.isArray(res.results)) {
         return res;
       }
     } catch (e) {
       console.warn('[DramaService] Catalog browse failed, trying fallback:', e.message);
     }
 
-    // 上游接口超时或无数据时，自动降级回退到全网热播搜索，保障高可用
+    if (category !== 'hot-drama' || genre) {
+      throw Object.assign(new Error('所选分类暂不可用，请稍后重试'), { status: 502 });
+    }
+    // Only the general hot chart can fall back to a general hot search.
     try {
       const fallback = await this.search('热播', page);
       if (fallback && Array.isArray(fallback.results) && fallback.results.length > 0) {
@@ -65,7 +88,7 @@ class DramaService {
       console.error('[DramaService] Fallback catalog search failed:', e.message);
     }
 
-    return { results: [], page: 1, total: 0, hasMore: false };
+    return { results: [], page, total: 0, hasMore: false };
   }
 
   /**
