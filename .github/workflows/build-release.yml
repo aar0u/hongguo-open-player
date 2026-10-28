@@ -14,7 +14,7 @@ permissions:
 jobs:
   prep:
     name: Prepare Release Version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       raw_version: ${{ steps.version.outputs.raw_version }}
@@ -92,7 +92,7 @@ jobs:
   release:
     name: Create or Update GitHub Release
     needs: [prep, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
