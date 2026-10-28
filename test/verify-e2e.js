@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: GPL-3.0-only
+const assert = require('assert');
+const axios = require('axios');
+const { app, server } = require('../src/server/index.js');
+
+const BASE_URL = 'http://127.0.0.1:8899';
+
+async function runTests() {
+  console.log('\n======================================================');
+  console.log('🧪 开始红果短剧全链路自动化端到端测试 (E2E Verification)');
+  console.log('======================================================\n');
+
+  try {
+    // 1. 验证静态前端资源服务
+    console.log('▶ [1/7] 验证静态前端资源交付...');
+    const htmlRes = await axios.get(`${BASE_URL}/`);
+    assert.strictEqual(htmlRes.status, 200);
+    assert(htmlRes.data.includes('红果短剧桌面播放器'), 'index.html 标题应正确');
+    assert(htmlRes.data.includes('vue.global.prod.js'), '应包含本地 Vue 3 引用');
+
+    const jsRes = await axios.get(`${BASE_URL}/js/app.js`);
+    assert.strictEqual(jsRes.status, 200);
+    assert(jsRes.data.includes('createApp'), 'app.js 应成功送达');
+    console.log('  ✅ 前端静态 SPA 资源交付正常\n');
+
+    // 2. 验证剧场目录接口
+    console.log('▶ [2/7] 验证热门短剧目录获取 (GET /api/catalog)...');
+    const catalogRes = await axios.get(`${BASE_URL}/api/catalog?category=hot-drama&page=1`);
+    assert.strictEqual(catalogRes.status, 200);
+    const catalogDramas = catalogRes.data?.results || [];
+    assert(catalogDramas.length > 0, '热门剧场应返回短剧列表');
+    console.log(`  ✅ 成功获取热门短剧列表，返回 ${catalogDramas.length} 部剧目:`);
+    console.log(`     示例: 《${catalogDramas[0]?.series_title}》 (总集数: ${catalogDramas[0]?.episode_count})\n`);
+
+    // 3. 验证短剧全网关键词检索
+    console.log('▶ [3/7] 验证短剧搜索接口 (GET /api/search)...');
+    const testKeyword = '离婚';
+    const searchRes = await axios.get(`${BASE_URL}/api/search?keyword=${encodeURIComponent(testKeyword)}`);
+    assert.strictEqual(searchRes.status, 200);
+    const searchResults = searchRes.data?.results || [];
+    assert(searchResults.length > 0, '搜索应返回结果');
+    const targetDrama = searchResults[0];
+    console.log(`  ✅ 搜索关键词 "${testKeyword}" 成功，返回 ${searchResults.length} 条记录:`);
+    console.log(`     首位匹配剧目: 《${targetDrama.series_title}》 (series_id: ${targetDrama.series_id})\n`);
+
+    // 4. 验证全部分集列表获取
+    console.log('▶ [4/7] 验证剧集全集拉取 (GET /api/series/:seriesId)...');
+    const seriesId = targetDrama.series_id || '7696091370296970265';
+    const seriesRes = await axios.get(`${BASE_URL}/api/series/${seriesId}`);
+    assert.strictEqual(seriesRes.status, 200);
+    const seriesData = seriesRes.data;
+    assert.strictEqual(seriesData.series_id, seriesId);
+    assert(Array.isArray(seriesData.episodes) && seriesData.episodes.length > 0, '剧目应返回分集数组');
+    console.log(`  ✅ 《${seriesData.series_title}》分集列表加载成功，共 ${seriesData.episodes.length} 集全部就绪:`);
+    console.log(`     第 1 集 vid: ${seriesData.episodes[0].vid}`);
+    console.log(`     第 4 集 vid: ${seriesData.episodes[3].vid}`);
+    console.log(`     末尾集 vid: ${seriesData.episodes[seriesData.episodes.length - 1].vid}\n`);
+
+    // 5. 验证单集视频解析与 Spade-A 密钥派生
+    console.log('▶ [5/7] 验证单集播放信息解析 (GET /api/play/:vid)...');
+    const ep4 = seriesData.episodes[3]; // 选择第 4 集（超越免费集数壁垒）
+    const playRes = await axios.get(`${BASE_URL}/api/play/${ep4.vid}?quality=1080p`);
+    assert.strictEqual(playRes.status, 200);
+    const playData = playRes.data;
+    assert(playData.url, '应解析出有效的媒体 URL');
+    assert(playData.contentKeyHex, '应成功派生 AES-128 解密密钥');
+    console.log(`  ✅ 第 4 集 (${ep4.vid}) 解析成功:`);
+    console.log(`     编码: ${playData.codec}`);
+    console.log(`     清晰度: ${playData.quality}`);
+    console.log(`     派生 AES-128 密钥: ${playData.contentKeyHex}\n`);
+
+    // 6. 验证流式边下边解边播代理与 Range 分片支持
+    console.log('▶ [6/7] 验证流媒体解密代理服务 (GET /api/stream/:vid)...');
+    // 6.1 HEAD 请求验证
+    const headRes = await axios.head(`${BASE_URL}/api/stream/${ep4.vid}`);
+    assert.strictEqual(headRes.status, 200);
+    assert.strictEqual(headRes.headers['content-type'], 'video/mp4');
+    assert.strictEqual(headRes.headers['accept-ranges'], 'bytes');
+    const totalBytes = parseInt(headRes.headers['content-length'], 10);
+    assert(totalBytes > 1024 * 1024, '解密后的 MP4 体积应大于 1MB');
+
+    // 6.2 Range 分片请求验证 (bytes=0-1023)
+    const rangeRes = await axios.get(`${BASE_URL}/api/stream/${ep4.vid}`, {
+      headers: { Range: 'bytes=0-1023' },
+      responseType: 'arraybuffer'
+    });
+    assert.strictEqual(rangeRes.status, 206, '分片请求应返回 HTTP 206 Partial Content');
+    assert.strictEqual(rangeRes.headers['content-range'], `bytes 0-1023/${totalBytes}`);
+    assert.strictEqual(rangeRes.data.length, 1024);
+
+    // 6.3 验证解密后的 MP4 文件头特征 (ftyp 盒子)
+    const headerBuf = Buffer.from(rangeRes.data);
+    const ftypBox = headerBuf.subarray(4, 8).toString('ascii');
+    assert.strictEqual(ftypBox, 'ftyp', '解密后的流首部应为标准 MP4 ftyp 盒子');
+    console.log(`  ✅ 实时流式解密代理验证通过:`);
+    console.log(`     完整时长/体积: ${(totalBytes / 1024 / 1024).toFixed(2)} MB`);
+    console.log(`     HTTP 206 Range 分片分段响应: 正常 (bytes 0-1023/${totalBytes})`);
+    console.log(`     标准 MP4 ftyp 容器标识: 校验成功\n`);
+
+    // 7. 验证进度记录与收藏夹持久化
+    console.log('▶ [7/7] 验证用户播放进度记录与收藏持久化...');
+    const progressPayload = {
+      series_id: seriesId,
+      series_title: seriesData.series_title,
+      cover: seriesData.cover,
+      episode_index: 4,
+      vid: ep4.vid,
+      position_sec: 45.5,
+      duration_sec: 152.0
+    };
+    const saveProgRes = await axios.post(`${BASE_URL}/api/progress`, progressPayload);
+    assert.strictEqual(saveProgRes.status, 200);
+
+    const historyRes = await axios.get(`${BASE_URL}/api/history`);
+    const histItem = (historyRes.data || []).find(h => h.series_id === seriesId);
+    assert(histItem, '观影历史中应查到刚刚观看的短剧');
+    assert.strictEqual(histItem.episode_index, 4);
+    assert.strictEqual(histItem.position_sec, 45.5);
+
+    // 收藏切换验证
+    const toggleRes = await axios.post(`${BASE_URL}/api/favorites/toggle`, seriesData);
+    assert.strictEqual(toggleRes.status, 200);
+    const favRes = await axios.get(`${BASE_URL}/api/favorites`);
+    const isFav = (favRes.data || []).some(f => f.series_id === seriesId);
+    assert(isFav, '收藏夹中应包含该短剧');
+    console.log(`  ✅ 用户观影进度与收藏数据本地持久化读写校验成功\n`);
+
+    console.log('======================================================');
+    console.log('🎉 所有 7 项全流程测试全部成功通过！');
+    console.log('======================================================\n');
+  } catch (err) {
+    console.error('\n❌ 测试失败:', err);
+    process.exitCode = 1;
+  } finally {
+    server.close();
+  }
+}
+
+// 延迟 300ms 待 HTTP 端口就绪后执行
+setTimeout(runTests, 300);

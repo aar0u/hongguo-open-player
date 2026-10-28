@@ -1,0 +1,30 @@
+{
+  "name": "hongguo-open-player",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server/index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node src/server/index.js",
+    "test": "node test/verify-e2e.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zfdang/hongguo-open-player.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/zfdang/hongguo-open-player/issues"
+  },
+  "homepage": "https://github.com/zfdang/hongguo-open-player#readme",
+  "dependencies": {
+    "axios": "^1.21.0",
+    "express": "^5.3.0",
+    "vue": "^3.5.44"
+  }
+}

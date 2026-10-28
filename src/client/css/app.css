@@ -1,0 +1,860 @@
+/* ============================================================
+   红果短剧桌面播放器 (Hongguo Open Player) 核心样式表
+   沉浸式暗黑影院视觉系统
+   ============================================================ */
+
+:root {
+  --bg-primary: #0b0d11;
+  --bg-surface: #14171f;
+  --bg-card: #1c202a;
+  --bg-hover: #262c3a;
+  --accent: #ff3355;
+  --accent-hover: #ff4d6d;
+  --accent-glow: rgba(255, 51, 85, 0.35);
+  --text-main: #f3f4f6;
+  --text-sub: #9ca3af;
+  --text-dim: #6b7280;
+  --border-color: #282e3d;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  min-height: 100vh;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+/* 顶部导航条 */
+.app-header {
+  height: 64px;
+  background-color: rgba(20, 23, 31, 0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.brand:hover {
+  transform: scale(1.02);
+}
+
+.brand-icon {
+  font-size: 24px;
+}
+
+.brand-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #ffffff 40%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.brand-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  background-color: rgba(255, 51, 85, 0.15);
+  color: var(--accent);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 51, 85, 0.3);
+  font-weight: 600;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.nav-item {
+  background: transparent;
+  border: none;
+  color: var(--text-sub);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-item:hover {
+  color: var(--text-main);
+  background-color: var(--bg-hover);
+}
+
+.nav-item.active {
+  color: #fff;
+  background-color: var(--accent);
+  box-shadow: 0 2px 10px var(--accent-glow);
+  font-weight: 600;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 30px;
+  padding: 4px 6px 4px 14px;
+  width: 320px;
+  transition: all 0.2s;
+}
+
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+  width: 360px;
+}
+
+.search-icon {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-right: 8px;
+}
+
+.search-box input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 13px;
+  width: 100%;
+}
+
+.clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.clear-btn:hover {
+  color: var(--text-main);
+}
+
+.search-btn {
+  background-color: var(--accent);
+  border: none;
+  color: #fff;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.search-btn:hover {
+  background-color: var(--accent-hover);
+}
+
+/* 热门标签栏 */
+.chips-bar {
+  padding: 16px 32px 4px 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chips-label {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.chip-item {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.chip-item:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background-color: rgba(255, 51, 85, 0.08);
+}
+
+/* 卡片容器 */
+.catalog-container {
+  padding: 20px 32px 60px 32px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.drama-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 24px;
+}
+
+.drama-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.drama-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(255, 51, 85, 0.4);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.card-cover-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background-color: #12141a;
+}
+
+.card-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s ease;
+}
+
+.drama-card:hover .card-cover {
+  transform: scale(1.05);
+}
+
+.cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.drama-card:hover .cover-overlay {
+  opacity: 1;
+}
+
+.play-badge {
+  background-color: var(--accent);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 30px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+
+.episode-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.progress-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(255, 51, 85, 0.9);
+  color: #fff;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.card-info {
+  padding: 12px 14px 14px 14px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.drama-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.4;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-tags {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.card-tag {
+  font-size: 11px;
+  background-color: var(--bg-surface);
+  color: var(--text-sub);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.drama-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 分页控件 */
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 40px;
+}
+
+.page-btn {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-indicator {
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
+/* ================= 剧场沉浸式播放器视图 ================= */
+.theater-view {
+  display: flex;
+  height: calc(100vh - 64px);
+  width: 100vw;
+  background-color: #060709;
+  position: fixed;
+  top: 64px;
+  left: 0;
+  z-index: 90;
+  overflow: hidden;
+}
+
+.player-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: #08090d;
+  position: relative;
+  border-right: 1px solid var(--border-color);
+}
+
+.player-header {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: rgba(14, 17, 23, 0.9);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.back-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.back-btn:hover {
+  color: #fff;
+  border-color: var(--text-sub);
+}
+
+.now-playing-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.playing-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.playing-ep-badge {
+  font-size: 12px;
+  background-color: rgba(255, 51, 85, 0.15);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.fav-action-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.fav-action-btn.favorited {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(255, 51, 85, 0.1);
+}
+
+/* 视频播放器舞台 (9:16 沉浸竖屏设计) */
+.video-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background-color: #000;
+  overflow: hidden;
+}
+
+.video-element {
+  max-height: 100%;
+  max-width: 100%;
+  aspect-ratio: 9 / 16;
+  background-color: #000;
+  outline: none;
+  cursor: pointer;
+  box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+}
+
+.player-buffering {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  font-size: 14px;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 20px 32px;
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
+}
+
+.play-overlay-btn {
+  position: absolute;
+  width: 72px;
+  height: 72px;
+  background: rgba(255, 51, 85, 0.85);
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px var(--accent-glow);
+  transition: transform 0.2s;
+}
+
+.play-overlay-btn:hover {
+  transform: scale(1.1);
+}
+
+.video-error-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 20px;
+  text-align: center;
+}
+
+.retry-btn {
+  background-color: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* 底部控制器 */
+.player-controls {
+  height: 84px;
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-color);
+  padding: 0 20px 8px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.progress-bar-container {
+  height: 6px;
+  background: #2a3040;
+  border-radius: 3px;
+  position: relative;
+  cursor: pointer;
+  margin-bottom: 10px;
+  transition: height 0.15s;
+}
+
+.progress-bar-container:hover {
+  height: 8px;
+}
+
+.progress-bar-buffered {
+  position: absolute;
+  height: 100%;
+  background: #475569;
+  border-radius: 3px;
+  transition: width 0.2s;
+}
+
+.progress-bar-played {
+  position: absolute;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.progress-bar-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  display: none;
+}
+
+.progress-bar-container:hover .progress-bar-thumb {
+  display: block;
+}
+
+.controls-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.controls-left, .controls-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ctrl-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 16px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.ctrl-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.time-display {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
+}
+
+.speed-selector select {
+  background-color: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.volume-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.volume-slider {
+  width: 70px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.keyboard-hints {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* 侧边选集面板 */
+.theater-sidebar {
+  width: 380px;
+  background-color: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.sidebar-drama-header {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-cover {
+  width: 72px;
+  height: 96px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.sidebar-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  line-height: 1.4;
+}
+
+.sidebar-count {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.sidebar-fav-btn {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: all 0.2s;
+}
+
+.sidebar-fav-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(255, 51, 85, 0.1);
+}
+
+/* 分组标签 */
+.episode-group-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 14px 0 10px 0;
+  overflow-x: auto;
+}
+
+.group-tab-item {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.group-tab-item.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 选集网格 */
+.episode-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  padding-top: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.episode-btn {
+  height: 44px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-sub);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.episode-btn:hover {
+  background-color: var(--bg-hover);
+  color: #fff;
+  border-color: var(--text-dim);
+}
+
+.episode-btn.active {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.episode-btn.watched:not(.active) {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.eq-icon {
+  font-size: 10px;
+}
+
+/* 动效与通用元素 */
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-state, .empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0;
+  gap: 16px;
+  color: var(--text-dim);
+}
+
+.empty-icon {
+  font-size: 48px;
+}
