@@ -94,7 +94,7 @@
         <div v-if="currentDramas.length > 0 && currentTab !== 'history' && currentTab !== 'favorites'" class="pagination-bar">
           <button :disabled="currentPage <= 1 || loadingCatalog" class="page-btn" @click="changePage(-1)">上一页</button>
           <span class="page-indicator">第 {{ currentPage }} 页</span>
-          <button :disabled="loadingCatalog" class="page-btn" @click="changePage(1)">下一页</button>
+          <button :disabled="loadingCatalog || !hasMore" class="page-btn" @click="changePage(1)">下一页</button>
         </div>
       </div>
 
