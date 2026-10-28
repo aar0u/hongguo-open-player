@@ -22,6 +22,7 @@ class StreamService {
     this.activeJob = null;
     this.maxPending = 8;
     this.plans = new Map();
+    this.maxPlanBytes = 32 * 1024 * 1024;
     this.activeStreams = 0;
     this.streamControllers = new Set();
   }
@@ -300,7 +301,7 @@ class StreamService {
   async getStreamingPlan(vid, quality, signal) {
     const key = `${vid}:${quality}`;
     const cached = this.plans.get(key);
-    if (cached?.expires > Date.now()) return cached.plan;
+    if (cached?.expires > Date.now()) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
     let lastError;
     for (const variant of info.variants?.length ? info.variants : [info]) {
@@ -308,7 +309,9 @@ class StreamService {
       try {
         const plan = await prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
         this.plans.set(key, { plan, expires: Date.now() + 90000 });
-        if (this.plans.size > 8) this.plans.delete(this.plans.keys().next().value);
+        while (this.plans.size > 8 || [...this.plans.values()].reduce((sum, item) => sum + item.plan.bytes, 0) > this.maxPlanBytes) {
+          this.plans.delete(this.plans.keys().next().value);
+        }
         return plan;
       } catch (error) {
         if (error.code === 'RANGE_UNSUPPORTED') return null;

@@ -1001,7 +1001,7 @@ function mp4TrackInfo(data, top, total) {
 
     const ss = data.readUInt32BE(stsz.off + 12);
     const n = data.readUInt32BE(stsz.off + 16);
-    if (n > 1000000 || (ss === 0 && 20 + n * 4 > stsz.size)) throw new Error('Invalid MP4 sample sizes');
+    if (n > 100000 || (ss === 0 && 20 + n * 4 > stsz.size)) throw new Error('Invalid MP4 sample sizes');
     let sizes = [];
     if (ss === 0) {
       for (let i = 0; i < n; i++) {
@@ -1162,6 +1162,7 @@ function createMp4StreamingPlan(metadata, boxes, total) {
   });
   const samples = tracks.flatMap(track => track.ivs.map((iv, index) => ({ offset: track.offs[index], size: track.sizes[index], iv })))
     .sort((a, b) => a.offset - b.offset);
+  if (samples.length > 100000) throw new Error('MP4 sample count exceeds streaming budget');
   for (const sample of samples) if (!Number.isSafeInteger(sample.offset) || sample.offset + sample.size > total) throw new Error('Invalid encrypted MP4 sample');
   return { size, segments, samples };
 }

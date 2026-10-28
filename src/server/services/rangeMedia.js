@@ -53,8 +53,9 @@ async function prepareRangeMedia(variant, requestOptions, signal) {
   if (plan.samples.length && key.length !== 16) throw new Error('Invalid CENC key');
   // The metadata request signal belongs to a single acquisition. Each response
   // receives its own cancellation signal, so cached plans outlive closed requests.
-  return { size: plan.size, async *read(start, end, responseSignal) {
+  return { size: plan.size, bytes: metadata.length * 2 + plan.samples.length * 160 + plan.segments.length * 64, async *read(start, end, responseSignal) {
     for (const segment of plan.segments) {
+      responseSignal?.throwIfAborted();
       const from = Math.max(start, segment.start), to = Math.min(end, segment.start + segment.size - 1);
       if (from > to) continue;
       if (segment.buffer) { yield segment.buffer.subarray(from - segment.start, to - segment.start + 1); continue; }
