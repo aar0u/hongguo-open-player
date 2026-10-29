@@ -259,4 +259,228 @@ test('clicking controls blurs them and maintains focus on .player-container', ()
   assert.equal(focused, container);
 });
 
+test('actor tab navigation, paging, profile modal and opening drama works', async () => {
+  const requests = [];
+  const state = client(async (url) => {
+    requests.push(url);
+    if (url.startsWith('/api/actors/ranking')) {
+      return response({
+        success: true,
+        rank_date: '2026-10-29',
+        has_more: true,
+        actors: [
+          { actor_id: '7123456789', name: '张三', rank: 1, score: '1000万人气' },
+          { actor_id: '7123456790', name: '李四', rank: 2, score: '800万人气' }
+        ]
+      });
+    }
+    if (url.startsWith('/api/actors/7123456789/works')) {
+      return response({
+        success: true,
+        works: [
+          { series_id: 'series-101', series_title: '热血短剧', cover: 'https://img.test/cover.jpg' }
+        ]
+      });
+    }
+    if (url.startsWith('/api/actors/7123456789')) {
+      return response({
+        success: true,
+        actor: {
+          actor_id: '7123456789',
+          name: '张三',
+          intro: '青年演员',
+          related_actors: [{ actor_id: '7123456799', name: '王五' }]
+        }
+      });
+    }
+    if (url.startsWith('/api/series/series-101')) {
+      return response({
+        series_id: 'series-101',
+        series_title: '热血短剧',
+        episodes: [{ vid: 'v101', vid_index: 1, title: '第1集' }]
+      });
+    }
+    return response({ results: [], hasMore: false });
+  });
+
+  // 1. switchTab('actors')
+  state.switchTab('actors');
+  assert.equal(state.currentTab.value, 'actors');
+  assert.equal(state.actorPage.value, 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0], '/api/actors/ranking?page=1');
+  assert.equal(state.actors.value.length, 2);
+  assert.equal(state.actorRankDate.value, '2026-10-29');
+  assert.equal(state.actorHasMore.value, true);
+
+  // 2. changeActorPage(1)
+  state.changeActorPage(1);
+  assert.equal(state.actorPage.value, 2);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[1], '/api/actors/ranking?page=2');
+
+  // 3. openActorDetail
+  const openPromise = state.openActorDetail(state.actors.value[0]);
+  assert.equal(state.activeActor.value.name, '张三');
+  assert.equal(state.loadingActorWorks.value, true);
+  await openPromise;
+  assert.equal(state.loadingActorWorks.value, false);
+  assert.equal(state.activeActorDetail.value.intro, '青年演员');
+  assert.equal(state.actorWorks.value.length, 1);
+  assert.equal(state.actorWorks.value[0].series_title, '热血短剧');
+
+  // 4. playActorWork transitions into theater and closes modal
+  await state.playActorWork(state.actorWorks.value[0]);
+  assert.equal(state.activeActor.value, null);
+  assert.equal(state.viewMode.value, 'theater');
+  assert.equal(state.activeSeries.value.series_id, 'series-101');
+
+  // 5. Escape closes actor detail if open
+  const listeners = {};
+  const doc = { documentElement: { classList: { add() {} } } };
+  const stateWithKeys = client(async () => response([]), {
+    document: doc,
+    window: { addEventListener: (name, fn) => { listeners[name] = fn; } }
+  });
+  stateWithKeys.mountForTest();
+  stateWithKeys.activeActor.value = { actor_id: '7123456799', name: '王五' };
+  let prevented = false;
+  listeners.keydown({
+    target: { tagName: 'DIV' },
+    code: 'Escape',
+    key: 'Escape',
+    preventDefault: () => { prevented = true; }
+  });
+  assert.equal(prevented, true);
+  assert.equal(stateWithKeys.activeActor.value, null);
+});
+
+test('switching actors discards stale responses to prevent overwriting active actor', async () => {
+  const pendingRequests = new Map(); // url -> resolve
+  const state = client(url => new Promise(resolve => {
+    pendingRequests.set(url, resolve);
+  }));
+
+  // 1. Open Actor A
+  const promiseA = state.openActorDetail({ actor_id: '1001', name: '演员A' });
+  assert.equal(state.activeActor.value.name, '演员A');
+
+  // 2. Immediately switch to Actor B before A responds
+  const promiseB = state.openActorDetail({ actor_id: '1002', name: '演员B' });
+  assert.equal(state.activeActor.value.name, '演员B');
+
+  // 3. Resolve B's requests first
+  pendingRequests.get('/api/actors/1002')(response({
+    success: true,
+    actor: { actor_id: '1002', name: '演员B', intro: 'B的真实简介' }
+  }));
+  pendingRequests.get('/api/actors/1002/works?count=20&offset=0')(response({
+    success: true,
+    works: [{ series_id: 'b-series', series_title: 'B的作品' }],
+    total_count: 1
+  }));
+  await promiseB;
+
+  assert.equal(state.activeActor.value.name, '演员B');
+  assert.equal(state.activeActorDetail.value.name, '演员B');
+  assert.equal(state.activeActorDetail.value.intro, 'B的真实简介');
+  assert.equal(state.actorWorks.value[0].series_title, 'B的作品');
+
+  // 4. Now let A's slow requests arrive late
+  pendingRequests.get('/api/actors/1001')(response({
+    success: true,
+    actor: { actor_id: '1001', name: '演员A', intro: 'A的迟到简介' }
+  }));
+  pendingRequests.get('/api/actors/1001/works?count=20&offset=0')(response({
+    success: true,
+    works: [{ series_id: 'a-series', series_title: 'A的作品' }],
+    total_count: 1
+  }));
+  await promiseA;
+
+  // 5. Must NOT be overwritten by A!
+  assert.equal(state.activeActor.value.name, '演员B');
+  assert.equal(state.activeActorDetail.value.name, '演员B');
+  assert.equal(state.activeActorDetail.value.intro, 'B的真实简介');
+  assert.equal(state.actorWorks.value[0].series_title, 'B的作品');
+});
+
+test('actor works pagination loads batches and appends without duplicates', async () => {
+  const state = client(async (url) => {
+    if (url.includes('/api/actors/8888/works?count=20&offset=0')) {
+      return response({
+        success: true,
+        total_count: 3,
+        has_more: true,
+        works: [
+          { series_id: 's1', series_title: '作品1' },
+          { series_id: 's2', series_title: '作品2' }
+        ]
+      });
+    }
+    if (url.includes('/api/actors/8888/works?count=20&offset=2')) {
+      return response({
+        success: true,
+        total_count: 3,
+        has_more: false,
+        works: [
+          { series_id: 's3', series_title: '作品3' }
+        ]
+      });
+    }
+    if (url.startsWith('/api/actors/8888')) {
+      return response({
+        success: true,
+        actor: { actor_id: '8888', name: '多产演员' }
+      });
+    }
+    return response({ results: [] });
+  });
+
+  await state.openActorDetail({ actor_id: '8888', name: '多产演员' });
+  assert.equal(state.actorWorks.value.length, 2);
+  assert.equal(state.actorWorksTotal.value, 3);
+  assert.equal(state.actorWorksHasMore.value, true);
+
+  // Load next batch
+  await state.loadMoreActorWorks();
+  assert.equal(state.actorWorks.value.length, 3);
+  assert.equal(state.actorWorks.value[2].series_title, '作品3');
+  assert.equal(state.actorWorksHasMore.value, false);
+});
+
+test('actor works failure displays error and retry recovers state', async () => {
+  let shouldFail = true;
+  const state = client(async (url) => {
+    if (url.startsWith('/api/actors/9999/works')) {
+      if (shouldFail) {
+        return { ok: false, status: 502, json: async () => ({ success: false, error: '网络连接超时' }) };
+      }
+      return response({
+        success: true,
+        total_count: 1,
+        has_more: false,
+        works: [{ series_id: 's9', series_title: '重试成功的作品' }]
+      });
+    }
+    return response({
+      success: true,
+      actor: { actor_id: '9999', name: '重试演员' }
+    });
+  });
+
+  await state.openActorDetail({ actor_id: '9999', name: '重试演员' });
+  assert.equal(state.loadingActorWorks.value, false);
+  assert.ok(state.actorWorksError.value.includes('网络连接超时') || state.actorWorksError.value.includes('失败'));
+  assert.equal(state.actorWorks.value.length, 0);
+
+  // Retry loading works
+  shouldFail = false;
+  await state.retryLoadActorWorks();
+  assert.equal(state.actorWorksError.value, '');
+  assert.equal(state.actorWorks.value.length, 1);
+  assert.equal(state.actorWorks.value[0].series_title, '重试成功的作品');
+});
+
+
 
