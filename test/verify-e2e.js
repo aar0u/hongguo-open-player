@@ -20,7 +20,7 @@ async function runTests() {
     const BASE_URL = `http://127.0.0.1:${port}`;
     const client = axios.create();
     // 1. 验证静态前端资源服务
-    console.log('▶ [1/7] 验证静态前端资源交付...');
+    console.log('▶ [1/8] 验证静态前端资源交付...');
     const htmlRes = await client.get(`${BASE_URL}/`);
     assert.strictEqual(htmlRes.status, 200);
     client.defaults.headers.common.Cookie = htmlRes.headers['set-cookie'][0].split(';')[0];
@@ -33,7 +33,7 @@ async function runTests() {
     console.log('  ✅ 前端静态 SPA 资源交付正常\n');
 
     // 2. 验证剧场目录接口
-    console.log('▶ [2/7] 验证热门短剧目录获取 (GET /api/catalog)...');
+    console.log('▶ [2/8] 验证热门短剧目录获取 (GET /api/catalog)...');
     let catalogRes;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -51,7 +51,7 @@ async function runTests() {
     console.log(`     示例: 《${catalogDramas[0]?.series_title}》 (总集数: ${catalogDramas[0]?.episode_count})\n`);
 
     // 3. 验证短剧全网关键词检索
-    console.log('▶ [3/7] 验证短剧搜索接口 (GET /api/search)...');
+    console.log('▶ [3/8] 验证短剧搜索接口 (GET /api/search)...');
     const testKeyword = '离婚';
     let searchRes;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -72,7 +72,7 @@ async function runTests() {
     console.log(`     首位匹配剧目: 《${targetDrama.series_title}》 (series_id: ${targetDrama.series_id})\n`);
 
     // 4. 验证全部分集列表获取
-    console.log('▶ [4/7] 验证剧集全集拉取 (GET /api/series/:seriesId)...');
+    console.log('▶ [4/8] 验证剧集全集拉取 (GET /api/series/:seriesId)...');
     const seriesId = targetDrama.series_id || '7696091370296970265';
     const seriesRes = await client.get(`${BASE_URL}/api/series/${seriesId}`);
     assert.strictEqual(seriesRes.status, 200);
@@ -85,7 +85,7 @@ async function runTests() {
     console.log(`     末尾集 vid: ${seriesData.episodes[seriesData.episodes.length - 1].vid}\n`);
 
     // 5. 验证单集视频解析与 Spade-A 密钥派生
-    console.log('▶ [5/7] 验证单集播放信息解析 (GET /api/play/:vid)...');
+    console.log('▶ [5/8] 验证单集播放信息解析 (GET /api/play/:vid)...');
     const ep4 = seriesData.episodes[3]; // 选择第 4 集（超越免费集数壁垒）
     let playRes;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -107,7 +107,7 @@ async function runTests() {
     console.log('     AES-128 密钥派生: 成功\n');
 
     // 6. 验证流式边下边解边播代理与 Range 分片支持
-    console.log('▶ [6/7] 验证流媒体解密代理服务 (GET /api/stream/:vid)...');
+    console.log('▶ [6/8] 验证流媒体解密代理服务 (GET /api/stream/:vid)...');
     // 6.1 HEAD 请求验证
     const headRes = await client.head(`${BASE_URL}/api/stream/${ep4.vid}`);
     assert.strictEqual(headRes.status, 200);
@@ -135,7 +135,7 @@ async function runTests() {
     console.log(`     标准 MP4 ftyp 容器标识: 校验成功\n`);
 
     // 7. 验证进度记录与收藏夹持久化
-    console.log('▶ [7/7] 验证用户播放进度记录与收藏持久化...');
+    console.log('▶ [7/8] 验证用户播放进度记录与收藏持久化...');
     const progressPayload = {
       series_id: seriesId,
       series_title: seriesData.series_title,
@@ -170,8 +170,40 @@ async function runTests() {
     assert(isFav, '收藏夹中应包含该短剧');
     console.log(`  ✅ 用户观影进度与收藏数据本地持久化读写校验成功\n`);
 
+    // 8. 验证剧星榜与演员主页
+    console.log('▶ [8/8] 验证剧星榜与演员主页 (GET /api/actors/ranking)...');
+    let rankRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        rankRes = await client.get(`${BASE_URL}/api/actors/ranking?page=1&limit=5`, { timeout: 15000 });
+        if (rankRes.status === 200 && rankRes.data?.actors?.length > 0) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    assert.strictEqual(rankRes.status, 200);
+    assert(rankRes.data.actors.length > 0, '剧星榜应返回演员列表');
+    const firstActor = rankRes.data.actors[0];
+    console.log(`  ✅ 成功获取剧星榜第一名: ${firstActor.name} (${firstActor.score || '人气榜首'})`);
+    assert(firstActor.actor_id, '演员必须包含 actor_id');
+
+    let detailRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        detailRes = await client.get(`${BASE_URL}/api/actors/${firstActor.actor_id}`, { timeout: 15000 });
+        if (detailRes.status === 200 && detailRes.data?.actor?.name) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    assert.strictEqual(detailRes.status, 200);
+    assert.strictEqual(detailRes.data.actor.actor_id, firstActor.actor_id);
+    console.log(`  ✅ 成功获取演员主页: ${detailRes.data.actor.name}\n`);
+
     console.log('======================================================');
-    console.log('🎉 所有 7 项全流程测试全部成功通过！');
+    console.log('🎉 所有 8 项全流程测试全部成功通过！');
     console.log('======================================================\n');
   } catch (err) {
     console.error('\n❌ 测试失败:', err.response?.data?.error || err.message);

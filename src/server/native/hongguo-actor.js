@@ -15,6 +15,10 @@ function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
   return Object.assign(new Error(message), { code, status });
 }
 
+function clearActorSession() {
+  activeSession = null;
+}
+
 function catalogCover(value) {
   const compatible = appCover(value);
   try {
@@ -39,90 +43,18 @@ function extractEpisodeCount(subTitle) {
   return match ? parseInt(match[1], 10) : 0;
 }
 
-/**
- * 获取剧星榜（演员排行榜）
- * @param {Object} options
- * @param {number} [options.page=1] - 页码 (1..20)
- * @param {number} [options.limit=20] - 每页条数
- * @returns {Promise<Object>}
- */
-async function fetchActorRankings({ page = 1, limit = 20 } = {}) {
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const pageLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 20));
+async function defaultRequest(signed, deadline) {
+  return requestJson(signed.url, { method: 'GET', headers: signed.headers }, deadline);
+}
 
-  // 检查是否可以使用现有会话缓存
-  const now = Date.now();
-  if (activeSession && activeSession.expiresAt > now && activeSession.pages.has(pageNum)) {
-    const cached = activeSession.pages.get(pageNum);
-    logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}`);
-    return {
-      success: true,
-      actors: cached.actors,
-      rank_date: cached.rankDate,
-      page: pageNum,
-      limit: pageLimit,
-      has_more: cached.hasMore,
-      total: cached.actors.length,
-      from_cache: true
-    };
-  }
-
-  // 若需要请求第 2 页及以上，但无有效会话，需先拉取第 1 页建立会话
-  if (pageNum > 1 && (!activeSession || activeSession.expiresAt <= now)) {
-    logger.info('HongguoActor', `剧星榜会话未就绪，先拉取第 1 页建立分页会话`);
-    await fetchActorRankings({ page: 1, limit: pageLimit });
-  }
-
-  let values;
-  if (pageNum === 1 || !activeSession) {
-    values = {
-      tab_type: '26',
-      client_req_type: '2',
-      client_template: '2',
-      cell_id: RANK_CELL_ID,
-      cell_sub_id: '0',
-      selected_items: RANK_SELECTED,
-      sub_selected_items: RANK_SUB_SELECTED,
-      category_id: '0',
-      gender: '2',
-      limit: String(pageLimit),
-      offset: '0',
-      session_id: '',
-      background_selected_items: '',
-      panel_selected_items: '',
-      filter_ids: '',
-      unlimited_selector_change_type: '0'
-    };
-  } else {
-    values = {
-      tab_type: '18',
-      client_req_type: '2',
-      client_template: '2',
-      cell_id: RANK_CELL_ID,
-      cell_sub_id: '0',
-      selected_items: RANK_SELECTED,
-      sub_selected_items: RANK_SUB_SELECTED,
-      category_id: '0',
-      gender: '2',
-      limit: String(pageLimit),
-      offset: String(activeSession.nextOffset || (pageNum - 1) * pageLimit),
-      session_id: activeSession.sessionId || '',
-      background_selected_items: '',
-      panel_selected_items: '',
-      filter_ids: '',
-      unlimited_selector_change_type: '0'
-    };
-  }
-
-  const signed = signedMetadataRequest('/reading/bookapi/bookmall/cell/change/v', values);
-  const payload = await requestJson(signed.url, { method: 'GET', headers: signed.headers }, Date.now() + TIMEOUT_MS);
-
+function parseRankingPayload(payload, { pageNum = 1, pageLimit = 20, activeSession = null } = {}) {
   if (!payload || payload.code !== 0) {
     throw actorError(payload?.message || '获取剧星榜失败', 'ACTOR_UPSTREAM_ERROR', 502);
   }
 
   const cellView = payload.data?.cell_view;
   if (!cellView || !Array.isArray(cellView.cell_data)) {
+    logger.error('HongguoActor', `剧星榜结构异常 raw=${JSON.stringify(payload).slice(0, 500)}`);
     throw actorError('剧星榜返回结构异常', 'ACTOR_SCHEMA_ERROR', 502);
   }
 
@@ -181,49 +113,16 @@ async function fetchActorRankings({ page = 1, limit = 20 } = {}) {
   const nextOffset = payload.data?.next_offset;
   const sessionId = payload.data?.session_id || '';
 
-  // 更新会话存储
-  if (!activeSession || pageNum === 1) {
-    activeSession = {
-      sessionId,
-      nextOffset,
-      rankDate,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-      pages: new Map()
-    };
-  } else {
-    activeSession.nextOffset = nextOffset;
-    if (sessionId) activeSession.sessionId = sessionId;
-  }
-  activeSession.pages.set(pageNum, { actors, rankDate, hasMore });
-
-  logger.info('HongguoActor', `成功获取剧星榜: 第 ${pageNum} 页, 共 ${actors.length} 位演员, 统计截至=${rankDate || '最新'}`);
   return {
-    success: true,
     actors,
-    rank_date: rankDate,
-    page: pageNum,
-    limit: pageLimit,
-    has_more: hasMore,
-    total: actors.length
+    rankDate,
+    hasMore,
+    nextOffset,
+    sessionId
   };
 }
 
-/**
- * 获取演员个人主页信息
- * @param {string} actorId - 演员 ID 字符串
- * @returns {Promise<Object>}
- */
-async function fetchActorDetail(actorId) {
-  const cleanId = String(actorId || '').trim();
-  if (!/^\d{1,30}$/.test(cleanId)) {
-    throw actorError('无效的演员 ID', 'ACTOR_ID_INVALID', 400);
-  }
-
-  const signed = signedMetadataRequest('/reading/user/celebrity/homepage/v1/', {
-    encrypted_celebrity_id: cleanId
-  });
-
-  const payload = await requestJson(signed.url, { method: 'GET', headers: signed.headers }, Date.now() + TIMEOUT_MS);
+function parseDetailPayload(payload, cleanId) {
   if (!payload || payload.code !== 0) {
     throw actorError(payload?.message || '获取演员主页失败', 'ACTOR_UPSTREAM_ERROR', 502);
   }
@@ -253,31 +152,7 @@ async function fetchActorDetail(actorId) {
   };
 }
 
-/**
- * 获取演员参演短剧作品列表
- * @param {string} actorId - 演员 ID 字符串
- * @param {Object} [options]
- * @param {number} [options.count=20] - 单次拉取数量
- * @param {number} [options.offset=0] - 偏移量
- * @returns {Promise<Object>}
- */
-async function fetchActorWorks(actorId, { count = 20, offset = 0 } = {}) {
-  const cleanId = String(actorId || '').trim();
-  if (!/^\d{1,30}$/.test(cleanId)) {
-    throw actorError('无效的演员 ID', 'ACTOR_ID_INVALID', 400);
-  }
-
-  const reqCount = Math.max(1, Math.min(50, parseInt(count, 10) || 20));
-  const reqOffset = Math.max(0, parseInt(offset, 10) || 0);
-
-  const signed = signedMetadataRequest('/reading/user/celebrity/works/v1/', {
-    encrypted_celebrity_ids: cleanId,
-    offset: String(reqOffset),
-    count: String(reqCount),
-    req_scene: '0'
-  });
-
-  const payload = await requestJson(signed.url, { method: 'GET', headers: signed.headers }, Date.now() + TIMEOUT_MS);
+function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = {}) {
   if (!payload || payload.code !== 0) {
     throw actorError(payload?.message || '获取演员作品失败', 'ACTOR_UPSTREAM_ERROR', 502);
   }
@@ -322,10 +197,173 @@ async function fetchActorWorks(actorId, { count = 20, offset = 0 } = {}) {
   };
 }
 
+/**
+ * 获取剧星榜（演员排行榜）
+ * @param {Object} [options]
+ * @param {number} [options.page=1] - 页码 (1..20)
+ * @param {number} [options.limit=20] - 每页条数
+ * @param {Function} [options.request] - 自定义请求处理函数
+ * @returns {Promise<Object>}
+ */
+async function fetchActorRankings({ page = 1, limit = 20, request = defaultRequest } = {}) {
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const pageLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 20));
+
+  // 检查是否可以使用现有会话缓存
+  const now = Date.now();
+  if (activeSession && activeSession.expiresAt > now && activeSession.pages.has(pageNum)) {
+    const cached = activeSession.pages.get(pageNum);
+    logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}`);
+    return {
+      success: true,
+      actors: cached.actors,
+      rank_date: cached.rankDate,
+      page: pageNum,
+      limit: pageLimit,
+      has_more: cached.hasMore,
+      total: cached.actors.length,
+      from_cache: true
+    };
+  }
+
+  // 若需要请求第 2 页及以上，但无有效会话，需先拉取第 1 页建立会话
+  if (pageNum > 1 && (!activeSession || activeSession.expiresAt <= now)) {
+    logger.info('HongguoActor', `剧星榜会话未就绪，先拉取第 1 页建立分页会话`);
+    await fetchActorRankings({ page: 1, limit: pageLimit, request });
+  }
+
+  let values;
+  if (pageNum === 1 || !activeSession) {
+    values = {
+      tab_type: '26',
+      client_req_type: '2',
+      client_template: '2',
+      cell_id: RANK_CELL_ID,
+      cell_sub_id: '0',
+      selected_items: RANK_SELECTED,
+      sub_selected_items: RANK_SUB_SELECTED,
+      category_id: '0',
+      gender: '2',
+      limit: String(pageLimit),
+      offset: '0',
+      session_id: '',
+      background_selected_items: '',
+      panel_selected_items: '',
+      filter_ids: '',
+      unlimited_selector_change_type: '0'
+    };
+  } else {
+    values = {
+      tab_type: '18',
+      client_req_type: '2',
+      client_template: '2',
+      cell_id: RANK_CELL_ID,
+      cell_sub_id: '0',
+      selected_items: RANK_SELECTED,
+      sub_selected_items: RANK_SUB_SELECTED,
+      category_id: '0',
+      gender: '2',
+      limit: String(pageLimit),
+      offset: String(activeSession.nextOffset || (pageNum - 1) * pageLimit),
+      session_id: activeSession.sessionId || '',
+      background_selected_items: '',
+      panel_selected_items: '',
+      filter_ids: '',
+      unlimited_selector_change_type: '0'
+    };
+  }
+
+  const signed = signedMetadataRequest('/reading/bookapi/bookmall/cell/change/v', values);
+  const payload = await request(signed, Date.now() + TIMEOUT_MS);
+
+  const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession });
+  const { actors, rankDate, hasMore, nextOffset, sessionId } = parsed;
+
+  // 更新会话存储
+  if (!activeSession || pageNum === 1) {
+    activeSession = {
+      sessionId,
+      nextOffset,
+      rankDate,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      pages: new Map()
+    };
+  } else {
+    activeSession.nextOffset = nextOffset;
+    if (sessionId) activeSession.sessionId = sessionId;
+  }
+  activeSession.pages.set(pageNum, { actors, rankDate, hasMore });
+
+  logger.info('HongguoActor', `成功获取剧星榜: 第 ${pageNum} 页, 共 ${actors.length} 位演员, 统计截至=${rankDate || '最新'}`);
+  return {
+    success: true,
+    actors,
+    rank_date: rankDate,
+    page: pageNum,
+    limit: pageLimit,
+    has_more: hasMore,
+    total: actors.length
+  };
+}
+
+/**
+ * 获取演员个人主页信息
+ * @param {string} actorId - 演员 ID 字符串
+ * @param {Object} [options]
+ * @param {Function} [options.request] - 自定义请求处理函数
+ * @returns {Promise<Object>}
+ */
+async function fetchActorDetail(actorId, { request = defaultRequest } = {}) {
+  const cleanId = String(actorId || '').trim();
+  if (!/^\d{1,30}$/.test(cleanId)) {
+    throw actorError('无效的演员 ID', 'ACTOR_ID_INVALID', 400);
+  }
+
+  const signed = signedMetadataRequest('/reading/user/celebrity/homepage/v1/', {
+    encrypted_celebrity_id: cleanId
+  });
+
+  const payload = await request(signed, Date.now() + TIMEOUT_MS);
+  return parseDetailPayload(payload, cleanId);
+}
+
+/**
+ * 获取演员参演短剧作品列表
+ * @param {string} actorId - 演员 ID 字符串
+ * @param {Object} [options]
+ * @param {number} [options.count=20] - 单次拉取数量
+ * @param {number} [options.offset=0] - 偏移量
+ * @param {Function} [options.request] - 自定义请求处理函数
+ * @returns {Promise<Object>}
+ */
+async function fetchActorWorks(actorId, { count = 20, offset = 0, request = defaultRequest } = {}) {
+  const cleanId = String(actorId || '').trim();
+  if (!/^\d{1,30}$/.test(cleanId)) {
+    throw actorError('无效的演员 ID', 'ACTOR_ID_INVALID', 400);
+  }
+
+  const reqCount = Math.max(1, Math.min(50, parseInt(count, 10) || 20));
+  const reqOffset = Math.max(0, parseInt(offset, 10) || 0);
+
+  const signed = signedMetadataRequest('/reading/user/celebrity/works/v1/', {
+    encrypted_celebrity_ids: cleanId,
+    offset: String(reqOffset),
+    count: String(reqCount),
+    req_scene: '0'
+  });
+
+  const payload = await request(signed, Date.now() + TIMEOUT_MS);
+  return parseWorksPayload(payload, cleanId, { reqOffset, reqCount });
+}
+
 module.exports = {
   fetchActorRankings,
   fetchActorDetail,
   fetchActorWorks,
+  parseRankingPayload,
+  parseDetailPayload,
+  parseWorksPayload,
+  clearActorSession,
   catalogCover,
   extractEpisodeCount
 };

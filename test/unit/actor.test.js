@@ -2,7 +2,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
-const { catalogCover, extractEpisodeCount, fetchActorRankings, fetchActorDetail, fetchActorWorks } = require('../../src/server/native/hongguo-actor');
+const {
+  catalogCover,
+  extractEpisodeCount,
+  parseRankingPayload,
+  parseDetailPayload,
+  parseWorksPayload,
+  clearActorSession,
+  fetchActorRankings,
+  fetchActorDetail,
+  fetchActorWorks
+} = require('../../src/server/native/hongguo-actor');
+const dramaService = require('../../src/server/services/dramaService');
 const { startServer } = require('../../src/server/index');
 
 test('catalogCover converts HEIC to JPEG compatible variants and preserves JPEG', () => {
@@ -27,44 +38,267 @@ test('extractEpisodeCount parses various subtitle formats', () => {
   assert.equal(extractEpisodeCount(null), 0);
 });
 
-test('actor ranking, homepage, and works live API end-to-end integration', async () => {
-  // 1. Fetch ranking page 1
-  const rankRes = await fetchActorRankings({ page: 1, limit: 10 });
-  assert.equal(rankRes.success, true);
-  assert.ok(Array.isArray(rankRes.actors));
-  assert.ok(rankRes.actors.length > 0);
+test('parseRankingPayload validates schema, selector mismatches, and extracts actor rankings', () => {
+  // 1. Error on invalid code
+  assert.throws(() => parseRankingPayload({ code: 1, message: '系统繁忙' }), /系统繁忙/);
+  assert.throws(() => parseRankingPayload({ code: 0, data: {} }), /剧星榜返回结构异常/);
 
-  const topActor = rankRes.actors[0];
-  assert.equal(topActor.rank, 1);
-  assert.ok(typeof topActor.actor_id === 'string' && topActor.actor_id.length > 5);
-  assert.ok(typeof topActor.name === 'string' && topActor.name.length > 0);
-  assert.ok(topActor.score.includes('人气') || topActor.score.length > 0);
-  assert.ok(topActor.avatar.startsWith('http'));
+  // 2. Error on selector mismatch
+  const wrongSelector = {
+    code: 0,
+    data: {
+      cell_view: {
+        cell_data: [],
+        cell_selector: {
+          outer_row: {
+            items: [{ is_selected: true, selector_item_id: 'ranklist_series_drama' }]
+          }
+        }
+      }
+    }
+  };
+  assert.throws(() => parseRankingPayload(wrongSelector), /服务端未选中演员榜/);
 
-  // 2. Fetch actor detail
-  const detailRes = await fetchActorDetail(topActor.actor_id);
+  // 3. Error on sub selector mismatch (e.g. star fans ranking)
+  const wrongSubSelector = {
+    code: 0,
+    data: {
+      cell_view: {
+        cell_data: [],
+        cell_selector: {
+          outer_row: {
+            items: [{
+              is_selected: true,
+              selector_item_id: 'ranklist_celebrity',
+              sub_cell_selector: {
+                outer_row: {
+                  items: [{ is_selected: true, selector_item_id: 'ranklist_actor_fans' }]
+                }
+              }
+            }]
+          }
+        }
+      }
+    }
+  };
+  assert.throws(() => parseRankingPayload(wrongSubSelector), /不可用星光榜冒充/);
+
+  // 4. Valid payload extraction
+  const validPayload = {
+    code: 0,
+    data: {
+      has_more: true,
+      next_offset: 20,
+      session_id: 'sess-12345',
+      cell_view: {
+        cell_data_json: JSON.stringify({ rank_list_date: '2026年10月28日' }),
+        cell_selector: {
+          outer_row: {
+            items: [{
+              is_selected: true,
+              selector_item_id: 'ranklist_celebrity',
+              sub_cell_selector: {
+                outer_row: {
+                  items: [{ is_selected: true, selector_item_id: 'ranklist_series_actor' }]
+                }
+              }
+            }]
+          }
+        },
+        cell_data: [
+          {
+            ugc_user_data: [
+              {
+                user_info: {
+                  user_id: '111',
+                  base_info: {
+                    actor_id_str: '7602119348190205246',
+                    user_name: '何健麒',
+                    user_avatar: 'https://p3-reading-sign.fqnovelpic.com/novel-pic/abc~tplv-81nmtwyey9.heic'
+                  }
+                },
+                rec_text_item: { RecommendText: '1047万人气' },
+                intro: '青年男演员',
+                sub_title_list: [{ content: '《大魔王》' }, { content: '《逆袭归来》' }],
+                rank_change_data: { rank_change_type: 1, ChangeNum: 2 }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  };
+
+  const parsed = parseRankingPayload(validPayload, { pageNum: 1, pageLimit: 20 });
+  assert.equal(parsed.rankDate, '2026年10月28日');
+  assert.equal(parsed.hasMore, true);
+  assert.equal(parsed.nextOffset, 20);
+  assert.equal(parsed.sessionId, 'sess-12345');
+  assert.equal(parsed.actors.length, 1);
+
+  const actor = parsed.actors[0];
+  assert.equal(actor.rank, 1);
+  assert.equal(actor.actor_id, '7602119348190205246');
+  assert.equal(actor.name, '何健麒');
+  assert.ok(actor.avatar.includes('p3-novel.byteimg.com'));
+  assert.equal(actor.score, '1047万人气');
+  assert.equal(actor.rank_change.type, 1);
+  assert.equal(actor.rank_change.num, 2);
+  assert.deepEqual(actor.sub_titles, ['《大魔王》', '《逆袭归来》']);
+});
+
+test('fetchActorRankings handles pagination and in-memory session caching', async () => {
+  clearActorSession();
+
+  let requestCount = 0;
+  const mockRequest = async (signed) => {
+    requestCount++;
+    const isFirstPage = signed.url.includes('tab_type=26');
+    return {
+      code: 0,
+      data: {
+        has_more: isFirstPage,
+        next_offset: isFirstPage ? 10 : 20,
+        session_id: 'mock-session-id',
+        cell_view: {
+          cell_data_json: JSON.stringify({ rank_list_date: '2026年10月29日' }),
+          cell_data: [
+            {
+              ugc_user_data: [
+                {
+                  user_info: {
+                    base_info: {
+                      actor_id_str: isFirstPage ? '7602119348190205246' : '7602119348190205247',
+                      user_name: isFirstPage ? '演员A' : '演员B'
+                    }
+                  },
+                  rec_text_item: { RecommendText: isFirstPage ? '1000万人气' : '900万人气' }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    };
+  };
+
+  // 1. Fetch page 1
+  const resPage1 = await fetchActorRankings({ page: 1, limit: 10, request: mockRequest });
+  assert.equal(resPage1.success, true);
+  assert.equal(resPage1.actors[0].name, '演员A');
+  assert.equal(requestCount, 1);
+
+  // 2. Fetch page 1 again -> should hit memory cache without network call
+  const resPage1Cached = await fetchActorRankings({ page: 1, limit: 10, request: mockRequest });
+  assert.equal(resPage1Cached.from_cache, true);
+  assert.equal(requestCount, 1);
+
+  // 3. Fetch page 2 -> should use session to fetch next page
+  const resPage2 = await fetchActorRankings({ page: 2, limit: 10, request: mockRequest });
+  assert.equal(resPage2.success, true);
+  assert.equal(resPage2.actors[0].name, '演员B');
+  assert.equal(requestCount, 2);
+});
+
+test('fetchActorDetail and fetchActorWorks parse profiles, related actors and drama works', async () => {
+  // 1. Detail parsing
+  const mockDetailRequest = async () => ({
+    code: 0,
+    data: {
+      celebrity_info: {
+        nickname: '何健麒',
+        avatar: 'https://p3-reading-sign.fqnovelpic.com/novel-pic/avatar.jpeg',
+        intro: '中国内地短剧演员',
+        related_celebrities: [
+          { celebrity_id: '7602119348190205248', nickname: '马秋元', intro: '常驻搭档' }
+        ]
+      }
+    }
+  });
+
+  const detailRes = await fetchActorDetail('7602119348190205246', { request: mockDetailRequest });
   assert.equal(detailRes.success, true);
-  assert.ok(detailRes.actor);
-  assert.equal(detailRes.actor.actor_id, topActor.actor_id);
-  assert.equal(detailRes.actor.name, topActor.name);
+  assert.equal(detailRes.actor.actor_id, '7602119348190205246');
+  assert.equal(detailRes.actor.name, '何健麒');
+  assert.equal(detailRes.actor.related_celebrities.length, 1);
+  assert.equal(detailRes.actor.related_celebrities[0].name, '马秋元');
 
-  // 3. Fetch actor works
-  const worksRes = await fetchActorWorks(topActor.actor_id, { count: 10 });
+  // 2. Works parsing
+  const mockWorksRequest = async () => ({
+    code: 0,
+    data: {
+      works: {
+        '7602119348190205246': {
+          total_count: 50,
+          has_more: true,
+          video_list: [
+            {
+              series_id: '7700249043456248857',
+              title: '何总的贴身秘书',
+              cover: 'https://p3-reading-sign.fqnovelpic.com/novel-pic/cover.jpeg',
+              sub_title: '都市脑洞·80集',
+              score: '9.6'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const worksRes = await fetchActorWorks('7602119348190205246', { count: 10, offset: 0, request: mockWorksRequest });
   assert.equal(worksRes.success, true);
-  assert.ok(Array.isArray(worksRes.works));
-  if (worksRes.works.length > 0) {
-    const work = worksRes.works[0];
-    assert.ok(typeof work.series_id === 'string' && work.series_id.length > 5);
-    assert.ok(typeof work.series_title === 'string' && work.series_title.length > 0);
-    assert.ok(work.cover.startsWith('http'));
-  }
+  assert.equal(worksRes.works.length, 1);
+  assert.equal(worksRes.works[0].series_id, '7700249043456248857');
+  assert.equal(worksRes.works[0].series_title, '何总的贴身秘书');
+  assert.equal(worksRes.works[0].episode_count, 80);
 
-  // 4. Input validation
-  await assert.rejects(fetchActorDetail('invalid-id!'), /无效的演员 ID/);
+  // 3. Input validation
+  await assert.rejects(fetchActorDetail('abc!'), /无效的演员 ID/);
   await assert.rejects(fetchActorWorks(''), /无效的演员 ID/);
 });
 
-test('actor REST API endpoints return JSON and handle invalid parameters', async () => {
+test('actor REST API endpoints return JSON and handle invalid parameters', async (t) => {
+  // Mock dramaService actor methods to ensure offline reliability in CI
+  const originalGetRankings = dramaService.getActorRankings;
+  const originalGetDetail = dramaService.getActorDetail;
+  const originalGetWorks = dramaService.getActorWorks;
+
+  t.after(() => {
+    dramaService.getActorRankings = originalGetRankings;
+    dramaService.getActorDetail = originalGetDetail;
+    dramaService.getActorWorks = originalGetWorks;
+  });
+
+  dramaService.getActorRankings = async ({ page, limit }) => ({
+    success: true,
+    page: Number(page) || 1,
+    limit: Number(limit) || 20,
+    actors: [
+      { actor_id: '7602119348190205246', name: '何健麒', rank: 1, score: '1000万人气' }
+    ]
+  });
+
+  dramaService.getActorDetail = async (actorId) => {
+    if (!/^\d{1,30}$/.test(actorId)) {
+      throw Object.assign(new Error('无效的演员 ID'), { code: 'ACTOR_ID_INVALID', status: 400 });
+    }
+    return {
+      success: true,
+      actor: { actor_id: actorId, name: '何健麒', intro: '演员' }
+    };
+  };
+
+  dramaService.getActorWorks = async (actorId) => {
+    if (!/^\d{1,30}$/.test(actorId)) {
+      throw Object.assign(new Error('无效的演员 ID'), { code: 'ACTOR_ID_INVALID', status: 400 });
+    }
+    return {
+      success: true,
+      actor_id: actorId,
+      works: [{ series_id: '7700249043456248857', series_title: '测试短剧' }]
+    };
+  };
+
   const { server, port } = await startServer(0);
   try {
     // 1. Establish player session cookie
@@ -90,22 +324,21 @@ test('actor REST API endpoints return JSON and handle invalid parameters', async
     assert.equal(rankRes.status, 200);
     assert.equal(rankRes.data.success, true);
     assert.ok(Array.isArray(rankRes.data.actors));
-    assert.ok(rankRes.data.actors.length > 0);
-    const actorId = rankRes.data.actors[0].actor_id;
+    assert.equal(rankRes.data.actors[0].name, '何健麒');
 
-    // 2. GET /api/actors/:actorId
-    const detailRes = await get(`/api/actors/${actorId}`);
+    // 3. GET /api/actors/:actorId
+    const detailRes = await get('/api/actors/7602119348190205246');
     assert.equal(detailRes.status, 200);
     assert.equal(detailRes.data.success, true);
-    assert.equal(detailRes.data.actor.actor_id, actorId);
+    assert.equal(detailRes.data.actor.actor_id, '7602119348190205246');
 
-    // 3. GET /api/actors/:actorId/works
-    const worksRes = await get(`/api/actors/${actorId}/works?count=5`);
+    // 4. GET /api/actors/:actorId/works
+    const worksRes = await get('/api/actors/7602119348190205246/works');
     assert.equal(worksRes.status, 200);
     assert.equal(worksRes.data.success, true);
     assert.ok(Array.isArray(worksRes.data.works));
 
-    // 4. Invalid ID
+    // 5. Invalid ID returns 400
     const badRes = await get('/api/actors/not-a-number');
     assert.equal(badRes.status, 400);
     assert.ok(badRes.data.error.includes('无效的演员 ID'));
