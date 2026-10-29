@@ -28,16 +28,30 @@
     + '#tv-menu{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483600;display:flex;align-items:center;'
     + 'justify-content:center;background:rgba(0,0,0,.6)}'
     + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
-    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:22px;padding:14px 20px;margin:6px 0;'
+    // Chrome 66 ignores `gap` on flex containers, so the control bar items touch and overlap.
+    + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'
+    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
     + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
   document.head.appendChild(css);
 
   // ---- Menu key panel: reaches controls the arrow keys cannot (they seek and switch episodes) ----
+  // Areas the user enters from the Menu panel and navigates with the arrow keys.
+  var FOCUS_ZONES = '#tv-menu, #episode-sidebar, .app-header';
+
+  // The page calls .player-container.focus() on every play, click and episode change. Ignore that while the
+  // focus is in one of those areas; leaving them (Back) blurs the element first, so focus() works again.
+  var nativeFocus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function (opts) {
+    var a = document.activeElement;
+    if (this.classList.contains('player-container') && a && a.closest && a.closest(FOCUS_ZONES)) return;
+    return nativeFocus.call(this, opts);
+  };
+
   // In the theater the page blurs any focused button and pulls focus back to the player, which would make
   // the panel and the episode list unusable with a D-pad. Hide those focus events from the page.
   document.addEventListener('focusin', function (e) {
-    if (e.target.closest && e.target.closest('#tv-menu, #episode-sidebar')) e.stopImmediatePropagation();
+    if (e.target.closest && e.target.closest(FOCUS_ZONES)) e.stopImmediatePropagation();
   }, true);
 
   function menuClose() {
@@ -70,6 +84,16 @@
           setTimeout(function () {
             var b = document.querySelector('.episode-btn.active') || document.querySelector('.episode-btn');
             if (b) b.focus();
+          }, 80);
+        }
+      });
+      items.push({
+        text: '顶部菜单',
+        run: function () {
+          // After the click handlers: the page returns focus to the player on every button click.
+          setTimeout(function () {
+            var n = document.querySelector('.app-header .nav-item.active') || document.querySelector('.app-header .nav-item');
+            if (n) n.focus();
           }, 80);
         }
       });
@@ -119,7 +143,7 @@
   window.__tvBack = function () {
     if (menuClose()) return true;
     var a = document.activeElement;
-    if (a && a.closest && a.closest('#episode-sidebar')) {
+    if (a && a.closest && a.closest('#episode-sidebar, .app-header') && document.querySelector('.theater-view')) {
       a.blur();
       var pc = document.querySelector('.player-container');
       if (pc) pc.focus();
@@ -133,7 +157,7 @@
   window.addEventListener('keydown', function (e) {
     var menu = document.getElementById('tv-menu');
     var a = document.activeElement;
-    var inList = a && a.closest && a.closest('#episode-sidebar');
+    var inList = a && a.closest && a.closest('#episode-sidebar, .app-header') && document.querySelector('.theater-view');
     if (!menu && !inList) return;
     var arrows = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
     if (menu && arrows.indexOf(e.key) >= 0) {
