@@ -1,4 +1,13 @@
-// Prepended to app.js for old WebViews: Vue compiles the in-DOM template at runtime and keeps `?.` as written.
+// Prepended to app.js for old WebViews (Chrome 66).
+// fetch() defaulted to credentials 'omit' before Chrome 68, which drops the session cookie.
+(function () {
+  var nativeFetch = window.fetch;
+  window.fetch = function (input, init) {
+    return nativeFetch.call(window, input, Object.assign({ credentials: 'same-origin' }, init));
+  };
+})();
+
+// Vue compiles the in-DOM template at runtime and keeps `?.` as written, which Chrome 66 cannot parse.
 (function () {
   var root = document.getElementById('app');
   if (!root) return;
