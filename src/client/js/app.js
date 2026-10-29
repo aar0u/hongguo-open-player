@@ -387,7 +387,6 @@ createApp({
     const fitMode = ref('contain');
     function toggleFitMode() {
       fitMode.value = fitMode.value === 'contain' ? 'cover' : 'contain';
-      notify(fitMode.value === 'contain' ? '画面比例: 完整自适应' : '画面比例: 铺满全屏');
       keepPlayerFocus();
     }
 
