@@ -30,6 +30,7 @@
     + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
     // Chrome 66 ignores `gap` on flex containers, so the control bar items touch and overlap.
     + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'
+    + '.player-controls select:focus{outline:3px solid #ffb300!important;outline-offset:-3px!important}'
     + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
     + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
@@ -37,7 +38,7 @@
 
   // ---- Menu key panel: reaches controls the arrow keys cannot (they seek and switch episodes) ----
   // Areas the user enters from the Menu panel and navigates with the arrow keys.
-  var FOCUS_ZONES = '#tv-menu, #episode-sidebar, .app-header';
+  var FOCUS_ZONES = '#tv-menu, #episode-sidebar, .app-header, .player-controls';
 
   // The page calls .player-container.focus() on every play, click and episode change. Ignore that while the
   // focus is in one of those areas; leaving them (Back) blurs the element first, so focus() works again.
@@ -71,10 +72,7 @@
   function menuItems() {
     var items = [];
     if (document.querySelector('.theater-view')) {
-      var vol = document.querySelector('.volume-btn');
-      var fit = document.querySelector('.fit-btn');
       var side = document.querySelector('[aria-controls="episode-sidebar"]');
-      var sel = document.querySelector('.speed-selector select');
       var sideOpen = document.getElementById('episode-sidebar') && document.getElementById('episode-sidebar').style.display !== 'none';
       items.push({ text: document.fullscreenElement ? '退出全屏' : '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
       items.push({
@@ -98,19 +96,6 @@
         }
       });
       if (side) items.push({ text: sideOpen ? '收起选集栏' : '展开选集栏', run: function () { side.click(); } });
-      if (vol) items.push({ text: vol.textContent.indexOf('🔇') >= 0 ? '取消静音' : '静音', run: function () { vol.click(); } });
-      if (fit) items.push({ text: '画面：' + fit.textContent.trim(), run: function () { fit.click(); } });
-      if (sel) {
-        items.push({
-          text: '倍速：' + sel.options[sel.selectedIndex].text,
-          keepOpen: true,
-          run: function (btn) {
-            sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
-            sel.dispatchEvent(new Event('change'));
-            btn.textContent = '倍速：' + sel.options[sel.selectedIndex].text;
-          }
-        });
-      }
     }
     items.push({ text: '服务地址…', run: function () { window.TV && window.TV.address(); } });
     return items;
@@ -139,10 +124,72 @@
     return true;
   };
 
-  // Back key: close the panel, or leave the episode list and return focus to the player.
+  // ---- Control bar: Down brings up the bar at the bottom of the player, Left/Right pick, OK triggers ----
+  var barIndex = 0;
+
+  function barControls() {
+    return Array.prototype.slice.call(document.querySelectorAll('.player-controls .ctrl-btn, .player-controls select'))
+      .filter(function (el) { return !el.disabled; });
+  }
+
+  function enterBar() {
+    var pc = document.querySelector('.player-container');
+    var ctl = document.querySelector('.player-controls');
+    var list = barControls();
+    if (!pc || !ctl || list.length === 0) return;
+    // The page shows the bar on pointer activity and keeps it while the pointer is over it.
+    pc.dispatchEvent(new Event('pointermove'));
+    ctl.dispatchEvent(new Event('pointerenter'));
+    list[Math.min(barIndex, list.length - 1)].focus();
+  }
+
+  function leaveBar() {
+    var a = document.activeElement;
+    var ctl = document.querySelector('.player-controls');
+    var pc = document.querySelector('.player-container');
+    if (a) a.blur();
+    if (ctl) ctl.dispatchEvent(new Event('pointerleave')); // the page hides the bar after its idle timeout
+    if (pc) pc.focus();
+  }
+
+  function barKey(e, a) {
+    var list = barControls();
+    var i = list.indexOf(a);
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      var next = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowLeft' ? -1 : 1)));
+      barIndex = next;
+      list[next].focus();
+      e.preventDefault();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      leaveBar();
+      e.preventDefault();
+    } else if (e.key === 'Enter' && a.tagName === 'SELECT') {
+      // A native select would open a popup the remote cannot drive; step through the options instead.
+      a.selectedIndex = (a.selectedIndex + 1) % a.options.length;
+      a.dispatchEvent(new Event('change'));
+      setTimeout(function () { a.focus(); }, 0); // the page's change handler blurs the select
+      e.preventDefault();
+    }
+    e.stopImmediatePropagation();
+  }
+
+  // Clicking a bar button makes the page blur it and focus the player; take the focus back so the bar stays usable.
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest && e.target.closest('.player-controls .ctrl-btn');
+    if (!b || document.activeElement !== b) return;
+    setTimeout(function () {
+      if (!document.getElementById('tv-menu') && !b.disabled) b.focus();
+    }, 0);
+  }, true);
+
+  // Back key: close the panel, leave the control bar, or leave the episode list / top menu and return to the player.
   window.__tvBack = function () {
     if (menuClose()) return true;
     var a = document.activeElement;
+    if (a && a.closest && a.closest('.player-controls')) {
+      leaveBar();
+      return true;
+    }
     if (a && a.closest && a.closest('#episode-sidebar, .app-header') && document.querySelector('.theater-view')) {
       a.blur();
       var pc = document.querySelector('.player-container');
@@ -157,6 +204,15 @@
   window.addEventListener('keydown', function (e) {
     var menu = document.getElementById('tv-menu');
     var a = document.activeElement;
+    if (document.querySelector('.theater-view') && !menu) {
+      if (a && a.closest && a.closest('.player-controls')) { barKey(e, a); return; }
+      if (e.key === 'ArrowDown' && !(a && a.closest && a.closest(FOCUS_ZONES))) {
+        enterBar();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+    }
     var inList = a && a.closest && a.closest('#episode-sidebar, .app-header') && document.querySelector('.theater-view');
     if (!menu && !inList) return;
     var arrows = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
