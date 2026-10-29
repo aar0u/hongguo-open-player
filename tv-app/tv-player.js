@@ -10,8 +10,17 @@
 
   // The native surface sits under the WebView, so the page must stop painting over the video area.
   var css = document.createElement('style');
+  // The desktop header is 60px tall with 12-15px text; enlarge it for reading from the sofa. The theater
+  // view is positioned below the header, so it must follow the new height.
   css.textContent = 'html.np-on,html.np-on body,html.np-on .theater-view,html.np-on .player-container,'
-    + 'html.np-on .video-stage,html.np-on .video-element{background:transparent!important}';
+    + 'html.np-on .video-stage,html.np-on .video-element{background:transparent!important}'
+    + '.app-header{height:84px!important;padding:0 28px!important;gap:20px!important}'
+    + '.brand-icon{width:40px!important;height:40px!important}'
+    + '.brand-name{font-size:19px!important}'
+    + '.nav-item{font-size:17px!important;padding:8px 10px!important}'
+    + '.search-box{padding:6px 8px 6px 16px!important;width:clamp(150px,14vw,200px)!important;min-width:150px!important}'
+    + '.search-box input{font-size:18px!important}'
+    + '.theater-view{top:84px!important;height:calc(100vh - 84px)!important}';
   document.head.appendChild(css);
 
   // The engine may already have queued an error for the HEVC stream before attach() removes the src.

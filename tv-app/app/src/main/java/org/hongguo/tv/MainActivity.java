@@ -45,9 +45,6 @@ public class MainActivity extends Activity {
         + "if(inner)window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));"
         + "return inner;})()";
 
-    // Multiplier on the system's default page scale (setInitialScale takes an absolute percentage).
-    private static final float UI_SCALE = 1.15f;
-
     private WebView web;
     private NativePlayer nativePlayer;
     private View customView;
@@ -70,8 +67,6 @@ public class MainActivity extends Activity {
         st.setJavaScriptEnabled(true);
         st.setDomStorageEnabled(true);
         st.setMediaPlaybackRequiresUserGesture(false);
-        // The page is laid out for a desktop window; scale it up so the header and text read from the sofa.
-        web.setInitialScale(Math.round(getResources().getDisplayMetrics().density * 100 * UI_SCALE));
 
         nativePlayer = new NativePlayer(this, root, web);
         web.addJavascriptInterface(nativePlayer, "NP");
