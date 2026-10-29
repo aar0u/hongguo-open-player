@@ -70,33 +70,42 @@
     if (b) b.click();
   }
 
+  function focusTopMenu() {
+    var n = document.querySelector('.app-header .nav-item.active') || document.querySelector('.app-header .nav-item');
+    if (n) n.focus();
+  }
+
   function menuItems() {
     var items = [];
     if (document.querySelector('.theater-view')) {
       var side = document.querySelector('[aria-controls="episode-sidebar"]');
       var sideOpen = document.getElementById('episode-sidebar') && document.getElementById('episode-sidebar').style.display !== 'none';
-      items.push({ text: document.fullscreenElement ? '退出全屏' : '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
+      var fullscreen = !!document.fullscreenElement;
+      items.push({ text: fullscreen ? '退出全屏' : '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
+      // The episode list and the header are hidden in fullscreen, so those entries only make sense outside it.
+      if (!fullscreen) {
+        items.push({
+          text: '选集',
+          run: function () {
+            if (!sideOpen && side) side.click();
+            setTimeout(function () {
+              var b = document.querySelector('.episode-btn.active') || document.querySelector('.episode-btn');
+              if (b) b.focus();
+            }, 80);
+          }
+        });
+        // After the click handlers: the page returns focus to the player on every button click.
+        items.push({ text: '顶部菜单', run: function () { setTimeout(focusTopMenu, 80); } });
+        if (side) items.push({ text: sideOpen ? '收起选集栏' : '展开选集栏', run: function () { side.click(); } });
+      }
       items.push({
-        text: '选集',
+        text: '退出播放',
         run: function () {
-          if (!sideOpen && side) side.click();
-          setTimeout(function () {
-            var b = document.querySelector('.episode-btn.active') || document.querySelector('.episode-btn');
-            if (b) b.focus();
-          }, 80);
+          var exit = Array.prototype.slice.call(document.querySelectorAll('.player-header button'))
+            .filter(function (b) { return b.textContent.indexOf('退出播放') >= 0; })[0];
+          if (exit) exit.click();
         }
       });
-      items.push({
-        text: '顶部菜单',
-        run: function () {
-          // After the click handlers: the page returns focus to the player on every button click.
-          setTimeout(function () {
-            var n = document.querySelector('.app-header .nav-item.active') || document.querySelector('.app-header .nav-item');
-            if (n) n.focus();
-          }, 80);
-        }
-      });
-      if (side) items.push({ text: sideOpen ? '收起选集栏' : '展开选集栏', run: function () { side.click(); } });
     }
     items.push({ text: '服务地址…', run: function () { window.TV && window.TV.address(); } });
     return items;
@@ -207,8 +216,26 @@
     var a = document.activeElement;
     if (document.querySelector('.theater-view') && !menu) {
       if (a && a.closest && a.closest('.player-controls')) { barKey(e, a); return; }
-      if (e.key === 'ArrowDown' && !(a && a.closest && a.closest(FOCUS_ZONES))) {
+      var inZone = a && a.closest && a.closest(FOCUS_ZONES);
+      if (e.key === 'ArrowDown' && !inZone) {
         enterBar();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.key === 'ArrowUp' && !inZone) {
+        // Down is the control bar, Up is the menu: the Menu panel in fullscreen (no header there), the header otherwise.
+        if (!e.repeat) {
+          if (document.fullscreenElement) window.__tvMenu(); else focusTopMenu();
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.key === 'ArrowDown' && a.closest('.app-header')) {
+        // From the header back to the player, instead of the browser's pick of whatever is below.
+        a.blur();
+        document.querySelector('.player-container').focus();
         e.preventDefault();
         e.stopImmediatePropagation();
         return;
