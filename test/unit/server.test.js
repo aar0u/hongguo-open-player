@@ -2,6 +2,54 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { startServer } = require('../../src/server');
 const http = require('node:http');
+const { EventEmitter } = require('node:events');
+
+test('occupied preferred ports fall back without crashing or disturbing the existing service', async t => {
+  const existing = http.createServer((req, res) => res.end('existing instance'));
+  await new Promise(resolve => existing.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => existing.close(resolve)));
+  const occupiedPort = existing.address().port;
+  const { server, port } = await startServer(occupiedPort);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  assert.notEqual(port, occupiedPort);
+  assert.equal(server.address().address, '127.0.0.1');
+  assert.equal(server.address().port, port);
+  assert.equal(await (await fetch(`http://127.0.0.1:${occupiedPort}`)).text(), 'existing instance');
+  assert.equal((await fetch(`http://127.0.0.1:${port}`)).status, 200);
+});
+
+test('concurrent startup requests receive distinct listening servers', async t => {
+  const first = await startServer(0);
+  t.after(() => new Promise(resolve => first.server.close(resolve)));
+  const others = await Promise.all([startServer(first.port), startServer(first.port)]);
+  for (const { server } of others) t.after(() => new Promise(resolve => server.close(resolve)));
+  assert.equal(new Set([first.port, ...others.map(result => result.port)]).size, 3);
+  for (const { port } of others) assert.equal((await fetch(`http://127.0.0.1:${port}`)).status, 200);
+});
+
+test('startup rejects non-conflict and fallback bind failures without reading a null address', async t => {
+  const original = http.createServer;
+  t.after(() => { http.createServer = original; });
+  for (const codes of [['EACCES'], ['EADDRINUSE', 'EACCES']]) {
+    const ports = [];
+    const attempts = [];
+    http.createServer = () => {
+      const server = new EventEmitter();
+      server.address = () => { assert.fail('failed servers have no listening address'); };
+      server.listen = (port, host) => {
+        ports.push(port);
+        assert.equal(host, '127.0.0.1');
+        const code = codes[attempts.length - 1];
+        queueMicrotask(() => server.emit('error', Object.assign(new Error('bind failed'), { code })));
+      };
+      attempts.push(server);
+      return server;
+    };
+    await assert.rejects(startServer(8899), error => error.code === 'EACCES');
+    assert.deepEqual(ports, codes.length === 1 ? [8899] : [8899, 0]);
+    for (const server of attempts) assert.equal(server.listenerCount('listening'), 0);
+  }
+});
 
 test('loopback API blocks foreign origins and hosts and returns JSON errors', async t => {
   const { server, port } = await startServer(0);
