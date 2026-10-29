@@ -24,7 +24,10 @@
 (function () {
   if ('fullscreenElement' in document) return;
   var fs = null;
-  function change() { document.dispatchEvent(new Event('fullscreenchange')); }
+  function change() {
+    document.documentElement.classList.toggle('np-fs-on', !!fs); // tv-player.js hides the header with this
+    document.dispatchEvent(new Event('fullscreenchange'));
+  }
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: function () { return fs; } });
   Element.prototype.requestFullscreen = function () { fs = this; change(); return Promise.resolve(); };
   document.exitFullscreen = function () { fs = null; change(); return Promise.resolve(); };

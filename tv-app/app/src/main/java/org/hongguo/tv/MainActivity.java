@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -41,7 +42,8 @@ public class MainActivity extends Activity {
 
     // Returns true when the page has an inner view (theater, fullscreen, actor modal) that Back should close first.
     private static final String BACK_JS =
-        "(function(){var inner=!!(document.fullscreenElement||document.querySelector('.theater-view,.actor-modal-overlay'));"
+        "(function(){if(window.__tvBack&&window.__tvBack())return true;"
+        + "var inner=!!(document.fullscreenElement||document.querySelector('.theater-view,.actor-modal-overlay'));"
         + "if(inner)window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));"
         + "return inner;})()";
 
@@ -70,6 +72,12 @@ public class MainActivity extends Activity {
 
         nativePlayer = new NativePlayer(this, root, web);
         web.addJavascriptInterface(nativePlayer, "NP");
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void address() {
+                runOnUiThread(MainActivity.this::promptServerUrl);
+            }
+        }, "TV");
 
         web.setWebViewClient(new WebViewClient() {
             // The TV's system WebView (Chrome 66 on Android 9) cannot parse the client's modern syntax,
@@ -151,7 +159,10 @@ public class MainActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         switch (keyCode) {
             case KeyEvent.KEYCODE_MENU:
-                promptServerUrl();
+                // The page's menu panel handles it; fall back to the address dialog when no page is loaded.
+                web.evaluateJavascript("window.__tvMenu?window.__tvMenu():false", handled -> {
+                    if (!"true".equals(handled)) promptServerUrl();
+                });
                 return true;
             case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
             case KeyEvent.KEYCODE_MEDIA_PLAY:

@@ -20,8 +20,131 @@
     + '.nav-item{font-size:17px!important;padding:8px 10px!important}'
     + '.search-box{padding:6px 8px 6px 16px!important;width:clamp(150px,14vw,200px)!important;min-width:150px!important}'
     + '.search-box input{font-size:18px!important}'
-    + '.theater-view{top:84px!important;height:calc(100vh - 84px)!important}';
+    + '.theater-view{top:84px!important;height:calc(100vh - 84px)!important}'
+    // Emulated fullscreen (see legacy-banner.js): the page's own .is-fullscreen rules size the player.
+    + 'html.np-fs-on .app-header{display:none!important}'
+    + 'html.np-fs-on .theater-view{top:0!important;height:100vh!important}'
+    + 'html.np-fs-on .theater-sidebar{display:none!important}'
+    + '#tv-menu{position:fixed;top:0;left:0;right:0;bottom:0;z-index:2147483600;display:flex;align-items:center;'
+    + 'justify-content:center;background:rgba(0,0,0,.6)}'
+    + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
+    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:22px;padding:14px 20px;margin:6px 0;'
+    + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
+    + '#tv-menu button:focus{outline:none;border-color:#ffb300;background:#2a3040}';
   document.head.appendChild(css);
+
+  // ---- Menu key panel: reaches controls the arrow keys cannot (they seek and switch episodes) ----
+  // In the theater the page blurs any focused button and pulls focus back to the player, which would make
+  // the panel and the episode list unusable with a D-pad. Hide those focus events from the page.
+  document.addEventListener('focusin', function (e) {
+    if (e.target.closest && e.target.closest('#tv-menu, #episode-sidebar')) e.stopImmediatePropagation();
+  }, true);
+
+  function menuClose() {
+    var m = document.getElementById('tv-menu');
+    if (!m) return false;
+    m.remove();
+    var pc = document.querySelector('.player-container');
+    if (pc) pc.focus();
+    return true;
+  }
+
+  function clickSel(sel) {
+    var b = document.querySelector(sel);
+    if (b) b.click();
+  }
+
+  function menuItems() {
+    var items = [];
+    if (document.querySelector('.theater-view')) {
+      var vol = document.querySelector('.volume-btn');
+      var fit = document.querySelector('.fit-btn');
+      var side = document.querySelector('[aria-controls="episode-sidebar"]');
+      var sel = document.querySelector('.speed-selector select');
+      var sideOpen = document.getElementById('episode-sidebar') && document.getElementById('episode-sidebar').style.display !== 'none';
+      items.push({ text: document.fullscreenElement ? '退出全屏' : '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
+      items.push({
+        text: '选集',
+        run: function () {
+          if (!sideOpen && side) side.click();
+          setTimeout(function () {
+            var b = document.querySelector('.episode-btn.active') || document.querySelector('.episode-btn');
+            if (b) b.focus();
+          }, 80);
+        }
+      });
+      if (side) items.push({ text: sideOpen ? '收起选集栏' : '展开选集栏', run: function () { side.click(); } });
+      if (vol) items.push({ text: vol.textContent.indexOf('🔇') >= 0 ? '取消静音' : '静音', run: function () { vol.click(); } });
+      if (fit) items.push({ text: '画面：' + fit.textContent.trim(), run: function () { fit.click(); } });
+      if (sel) {
+        items.push({
+          text: '倍速：' + sel.options[sel.selectedIndex].text,
+          keepOpen: true,
+          run: function (btn) {
+            sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
+            sel.dispatchEvent(new Event('change'));
+            btn.textContent = '倍速：' + sel.options[sel.selectedIndex].text;
+          }
+        });
+      }
+    }
+    items.push({ text: '服务地址…', run: function () { window.TV && window.TV.address(); } });
+    return items;
+  }
+
+  window.__tvMenu = function () {
+    if (menuClose()) return true;
+    var m = document.createElement('div');
+    m.id = 'tv-menu';
+    var box = document.createElement('div');
+    box.className = 'box';
+    menuItems().forEach(function (it) {
+      var b = document.createElement('button');
+      b.textContent = it.text;
+      b.addEventListener('click', function () {
+        if (!it.keepOpen) menuClose();
+        it.run(b);
+        // The page's change handlers move focus back to the player; keep it on the panel item.
+        if (it.keepOpen) setTimeout(function () { b.focus(); }, 0);
+      });
+      box.appendChild(b);
+    });
+    m.appendChild(box);
+    document.body.appendChild(m);
+    box.firstChild.focus();
+    return true;
+  };
+
+  // Back key: close the panel, or leave the episode list and return focus to the player.
+  window.__tvBack = function () {
+    if (menuClose()) return true;
+    var a = document.activeElement;
+    if (a && a.closest && a.closest('#episode-sidebar')) {
+      a.blur();
+      var pc = document.querySelector('.player-container');
+      if (pc) pc.focus();
+      return true;
+    }
+    return false;
+  };
+
+  // While the panel or the episode list has focus, the arrow keys move focus instead of reaching the
+  // page's seek / episode shortcuts.
+  window.addEventListener('keydown', function (e) {
+    var menu = document.getElementById('tv-menu');
+    var a = document.activeElement;
+    var inList = a && a.closest && a.closest('#episode-sidebar');
+    if (!menu && !inList) return;
+    var arrows = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+    if (menu && arrows.indexOf(e.key) >= 0) {
+      var btns = Array.prototype.slice.call(menu.querySelectorAll('button'));
+      var i = btns.indexOf(a);
+      var next = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? i - 1 : i + 1;
+      btns[(next + btns.length) % btns.length].focus();
+      e.preventDefault();
+    }
+    e.stopImmediatePropagation();
+  }, true);
 
   // The engine may already have queued an error for the HEVC stream before attach() removes the src.
   // Drop engine errors on shimmed elements; only the ones fire() dispatches reach the page.
