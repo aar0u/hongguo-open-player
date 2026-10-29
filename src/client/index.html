@@ -18,6 +18,7 @@
         </div>
         <nav class="nav-tabs">
           <button class="nav-item" :class="{ active: currentTab === 'hot-drama' && viewMode === 'catalog' }" @click="switchTab('hot-drama')">🔥 热门榜单</button>
+          <button class="nav-item" :class="{ active: currentTab === 'actors' && viewMode === 'catalog' }" @click="switchTab('actors')">🌟 剧星榜</button>
           <button class="nav-item" :class="{ active: currentTab === 'real-drama' && viewMode === 'catalog' }" @click="switchTab('real-drama')">🎭 真人短剧</button>
           <button class="nav-item" :class="{ active: currentTab === 'comic-drama' && viewMode === 'catalog' }" @click="switchTab('comic-drama')">🎨 精品漫剧</button>
           <button class="nav-item" :class="{ active: currentTab === 'ai-drama' && viewMode === 'catalog' }" @click="switchTab('ai-drama')">🤖 AI 短剧</button>
@@ -45,13 +46,97 @@
     <!-- 主体内容区域 -->
     <main class="app-main">
       <!-- 快捷搜索推荐标签 -->
-      <section v-if="viewMode === 'catalog' && currentTab !== 'history' && currentTab !== 'favorites'" class="chips-bar">
+      <section v-if="viewMode === 'catalog' && currentTab !== 'history' && currentTab !== 'favorites' && currentTab !== 'actors'" class="chips-bar">
         <span class="chips-label">热门搜索：</span>
         <button v-for="tag in hotTags" :key="tag" class="chip-item" @click="quickSearch(tag)">{{ tag }}</button>
       </section>
 
+      <!-- 剧星榜（演员排行榜）视图 -->
+      <div v-if="viewMode === 'catalog' && currentTab === 'actors'" class="actor-ranking-container">
+        <!-- 榜单横幅介绍 -->
+        <div class="actor-banner">
+          <div class="actor-banner-content">
+            <div class="actor-banner-title-row">
+              <span class="actor-banner-icon">🌟</span>
+              <h2 class="actor-banner-title">红果短剧 · 剧星榜</h2>
+              <span v-if="actorRankDate" class="actor-rank-date-badge">统计截至 {{ actorRankDate }}</span>
+            </div>
+            <p class="actor-banner-desc">按演员参演剧播放量、粉丝关注及全网讨论热度综合排序 · 点击演员卡片查看详细主页与全部参演短剧</p>
+          </div>
+        </div>
+
+        <!-- 演员骨架屏加载 -->
+        <div v-if="loadingActors" class="actor-grid" aria-label="正在加载剧星榜" aria-busy="true">
+          <div v-for="n in 8" :key="n" class="skeleton-actor-card" aria-hidden="true">
+            <div class="skeleton-avatar"></div>
+            <div class="skeleton-line" style="width: 60%; margin: 12px auto 6px;"></div>
+            <div class="skeleton-line short" style="width: 40%; margin: 0 auto;"></div>
+          </div>
+        </div>
+
+        <!-- 演员为空状态 -->
+        <div v-else-if="actors.length === 0" class="empty-state">
+          <span class="empty-icon">🎭</span>
+          <h3>暂无剧星榜数据</h3>
+          <p>请稍后刷新重试</p>
+        </div>
+
+        <!-- 演员卡片网格 -->
+        <div v-else class="actor-grid">
+          <div
+            v-for="actor in actors"
+            :key="actor.actor_id"
+            class="actor-card"
+            :class="'rank-top-' + actor.rank"
+            @click="openActorDetail(actor)"
+          >
+            <!-- 排名与名次变化标识 -->
+            <div class="actor-card-header">
+              <div class="actor-rank-badge" :class="'top-' + actor.rank">
+                <span v-if="actor.rank === 1" class="rank-medal">🥇</span>
+                <span v-else-if="actor.rank === 2" class="rank-medal">🥈</span>
+                <span v-else-if="actor.rank === 3" class="rank-medal">🥉</span>
+                <span class="rank-num">TOP {{ actor.rank }}</span>
+              </div>
+              <div class="actor-rank-change" :class="getRankChangeClass(actor.rank_change)">
+                <span v-if="actor.rank_change?.type === 1">▲ {{ actor.rank_change.num || 1 }}</span>
+                <span v-else-if="actor.rank_change?.type === 2">▼ {{ actor.rank_change.num || 1 }}</span>
+                <span v-else>—</span>
+              </div>
+            </div>
+
+            <!-- 头像与人气 -->
+            <div class="actor-avatar-wrapper">
+              <img :src="actor.avatar" :alt="actor.name" class="actor-avatar" loading="lazy" @error="onAvatarError" />
+            </div>
+
+            <div class="actor-content">
+              <h3 class="actor-name" :title="actor.name">{{ actor.name }}</h3>
+              <div class="actor-score-tag">
+                <span class="fire-icon">🔥</span> {{ actor.score || '人气热推' }}
+              </div>
+              <div v-if="actor.sub_titles?.length" class="actor-tags">
+                <span v-for="(tag, i) in actor.sub_titles" :key="i" class="actor-tag">{{ tag }}</span>
+              </div>
+              <p v-if="actor.intro" class="actor-intro" :title="actor.intro">{{ actor.intro }}</p>
+            </div>
+
+            <div class="actor-card-footer">
+              <span class="view-works-btn">主页与作品 ❯</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 演员榜分页器 -->
+        <div v-if="actors.length > 0" class="pagination-bar">
+          <button :disabled="actorPage <= 1 || loadingActors" class="page-btn" @click="changeActorPage(-1)">上一页</button>
+          <span class="page-indicator">第 {{ actorPage }} 页</span>
+          <button :disabled="loadingActors || !actorHasMore" class="page-btn" @click="changeActorPage(1)">下一页</button>
+        </div>
+      </div>
+
       <!-- 剧集卡片网格列表 -->
-      <div v-if="viewMode === 'catalog'" class="catalog-container">
+      <div v-if="viewMode === 'catalog' && currentTab !== 'actors'" class="catalog-container">
         <!-- 加载中指示器 -->
         <div v-if="loadingCatalog" class="drama-grid" aria-label="正在加载短剧" aria-busy="true">
           <div v-for="n in 8" :key="n" class="skeleton-card" aria-hidden="true">
@@ -271,6 +356,90 @@
         </aside>
       </div>
     </main>
+
+    <!-- 演员个人主页与参演短剧弹窗 -->
+    <div v-if="activeActor" class="actor-modal-overlay" @click.self="closeActorDetail">
+      <div class="actor-modal" role="dialog" aria-modal="true" :aria-label="(activeActor.name || '演员') + '的主页与作品'">
+        <div class="actor-modal-header">
+          <div class="actor-profile-main">
+            <img :src="activeActor.avatar" :alt="activeActor.name" class="actor-profile-avatar" @error="onAvatarError" />
+            <div class="actor-profile-meta">
+              <div class="actor-profile-title-row">
+                <h2 class="actor-profile-name">{{ activeActor.name }}</h2>
+                <span v-if="activeActor.score" class="actor-score-tag"><span class="fire-icon">🔥</span> {{ activeActor.score }}</span>
+                <span v-if="activeActor.rank" class="actor-rank-pill">剧星榜 TOP {{ activeActor.rank }}</span>
+              </div>
+              <p v-if="activeActorDetail?.intro || activeActor.intro" class="actor-profile-intro">
+                {{ activeActorDetail?.intro || activeActor.intro }}
+              </p>
+              <!-- 合作演员推荐 -->
+              <div v-if="activeActorDetail?.related_celebrities?.length" class="related-celebrities-row">
+                <span class="related-label">合作演员：</span>
+                <div class="related-list">
+                  <button
+                    v-for="rel in activeActorDetail.related_celebrities"
+                    :key="rel.actor_id"
+                    class="related-actor-chip"
+                    @click="switchToRelatedActor(rel)"
+                    :title="rel.intro || rel.name"
+                  >
+                    <img :src="rel.avatar" :alt="rel.name" class="related-avatar" @error="onAvatarError" />
+                    <span>{{ rel.name }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <button class="modal-close-btn" @click="closeActorDetail" title="关闭 (Esc)">✕</button>
+        </div>
+
+        <div class="actor-modal-body">
+          <div class="works-section-header">
+            <h3 class="works-title">🎬 参演短剧作品 ({{ actorWorks.length }})</h3>
+            <span class="works-hint">点击任意短剧立即开播</span>
+          </div>
+
+          <!-- 作品加载骨架屏 -->
+          <div v-if="loadingActorWorks" class="drama-grid" aria-label="正在加载作品列表" aria-busy="true">
+            <div v-for="n in 4" :key="n" class="skeleton-card" aria-hidden="true">
+              <div class="skeleton-cover"></div><div class="skeleton-line"></div>
+            </div>
+          </div>
+
+          <!-- 作品为空状态 -->
+          <div v-else-if="actorWorks.length === 0" class="empty-works">
+            <p>暂未查询到该演员的独立短剧作品，换位演员看看吧</p>
+          </div>
+
+          <!-- 作品卡片网格 -->
+          <div v-else class="drama-grid actor-works-grid">
+            <div
+              v-for="work in actorWorks"
+              :key="work.series_id"
+              class="drama-card"
+              @click="playActorWork(work)"
+            >
+              <div class="card-cover-wrapper">
+                <img :src="work.cover" :alt="work.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
+                <div class="cover-overlay">
+                  <span class="play-badge">▶ 立即播放</span>
+                </div>
+                <span v-if="work.episode_count" class="episode-badge">全 {{ work.episode_count }} 集</span>
+                <span v-if="work.rec_text" class="rec-badge">{{ work.rec_text }}</span>
+              </div>
+              <div class="card-info">
+                <h4 class="drama-title" :title="work.series_title">{{ work.series_title }}</h4>
+                <div v-if="work.sub_title" class="card-tags">
+                  <span class="card-tag">{{ work.sub_title }}</span>
+                </div>
+                <p v-if="work.description" class="drama-desc">{{ work.description }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="toastText" class="app-toast" role="status" aria-live="polite">{{ toastText }}</div>
   </div>
 

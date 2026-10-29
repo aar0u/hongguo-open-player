@@ -182,7 +182,7 @@ function signedSearchRequest({ keyword, page = 1, cursor = null, identity } = {}
 const metadataDevice = { ...DEVICE, version_code: '73532', version_name: '7.3.5.32', manifest_version_code: '73532',
     update_version_code: '73532', pv_player: '73532', iid: localId(), device_id: localId() };
 function signedMetadataRequest(apiPath, values = {}, payload = null) {
-    if (!['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v'].includes(apiPath)) {
+    if (!['/reading/distribution/category/landpage/v/', '/reading/bookapi/bookmall/cell/change/v', '/reading/user/celebrity/homepage/v1/', '/reading/user/celebrity/works/v1/'].includes(apiPath)) {
         throw new Error('不支持的 App 目录接口');
     }
     const body = payload === null ? null : Buffer.from(JSON.stringify(payload));

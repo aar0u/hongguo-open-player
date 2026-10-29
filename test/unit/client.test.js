@@ -259,4 +259,101 @@ test('clicking controls blurs them and maintains focus on .player-container', ()
   assert.equal(focused, container);
 });
 
+test('actor tab navigation, paging, profile modal and opening drama works', async () => {
+  const requests = [];
+  const state = client(async (url) => {
+    requests.push(url);
+    if (url.startsWith('/api/actors/ranking')) {
+      return response({
+        success: true,
+        rank_date: '2026-10-29',
+        has_more: true,
+        actors: [
+          { actor_id: '7123456789', name: '张三', rank: 1, score: '1000万人气' },
+          { actor_id: '7123456790', name: '李四', rank: 2, score: '800万人气' }
+        ]
+      });
+    }
+    if (url.startsWith('/api/actors/7123456789/works')) {
+      return response({
+        success: true,
+        works: [
+          { series_id: 'series-101', series_title: '热血短剧', cover: 'https://img.test/cover.jpg' }
+        ]
+      });
+    }
+    if (url.startsWith('/api/actors/7123456789')) {
+      return response({
+        success: true,
+        actor: {
+          actor_id: '7123456789',
+          name: '张三',
+          intro: '青年演员',
+          related_actors: [{ actor_id: '7123456799', name: '王五' }]
+        }
+      });
+    }
+    if (url.startsWith('/api/series/series-101')) {
+      return response({
+        series_id: 'series-101',
+        series_title: '热血短剧',
+        episodes: [{ vid: 'v101', vid_index: 1, title: '第1集' }]
+      });
+    }
+    return response({ results: [], hasMore: false });
+  });
+
+  // 1. switchTab('actors')
+  state.switchTab('actors');
+  assert.equal(state.currentTab.value, 'actors');
+  assert.equal(state.actorPage.value, 1);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[0], '/api/actors/ranking?page=1');
+  assert.equal(state.actors.value.length, 2);
+  assert.equal(state.actorRankDate.value, '2026-10-29');
+  assert.equal(state.actorHasMore.value, true);
+
+  // 2. changeActorPage(1)
+  state.changeActorPage(1);
+  assert.equal(state.actorPage.value, 2);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[1], '/api/actors/ranking?page=2');
+
+  // 3. openActorDetail
+  const openPromise = state.openActorDetail(state.actors.value[0]);
+  assert.equal(state.activeActor.value.name, '张三');
+  assert.equal(state.loadingActorWorks.value, true);
+  await openPromise;
+  assert.equal(state.loadingActorWorks.value, false);
+  assert.equal(state.activeActorDetail.value.intro, '青年演员');
+  assert.equal(state.actorWorks.value.length, 1);
+  assert.equal(state.actorWorks.value[0].series_title, '热血短剧');
+
+  // 4. playActorWork transitions into theater and closes modal
+  await state.playActorWork(state.actorWorks.value[0]);
+  assert.equal(state.activeActor.value, null);
+  assert.equal(state.viewMode.value, 'theater');
+  assert.equal(state.activeSeries.value.series_id, 'series-101');
+
+  // 5. Escape closes actor detail if open
+  const listeners = {};
+  const doc = { documentElement: { classList: { add() {} } } };
+  const stateWithKeys = client(async () => response([]), {
+    document: doc,
+    window: { addEventListener: (name, fn) => { listeners[name] = fn; } }
+  });
+  stateWithKeys.mountForTest();
+  stateWithKeys.activeActor.value = { actor_id: '7123456799', name: '王五' };
+  let prevented = false;
+  listeners.keydown({
+    target: { tagName: 'DIV' },
+    code: 'Escape',
+    key: 'Escape',
+    preventDefault: () => { prevented = true; }
+  });
+  assert.equal(prevented, true);
+  assert.equal(stateWithKeys.activeActor.value, null);
+});
+
+
 

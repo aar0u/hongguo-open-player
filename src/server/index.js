@@ -187,7 +187,47 @@ app.post('/api/favorites/toggle', async (req, res) => {
 });
 
 /**
- * 8. 前端播放器核心事件/报错上报日志接口
+ * 8. 剧星榜（演员排行榜）
+ */
+app.get('/api/actors/ranking', async (req, res) => {
+  try {
+    const { page, limit } = req.query;
+    const data = await dramaService.getActorRankings({ page, limit });
+    res.json(data);
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 9. 演员个人主页详情
+ */
+app.get('/api/actors/:actorId', async (req, res) => {
+  try {
+    const { actorId } = req.params;
+    const data = await dramaService.getActorDetail(actorId);
+    res.json(data);
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 10. 演员参演短剧作品列表
+ */
+app.get('/api/actors/:actorId/works', async (req, res) => {
+  try {
+    const { actorId } = req.params;
+    const { count, offset } = req.query;
+    const data = await dramaService.getActorWorks(actorId, { count, offset });
+    res.json(data);
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 11. 前端播放器核心事件/报错上报日志接口
  */
 app.post('/api/client-log', (req, res) => {
   const { level = 'INFO', tag = 'ClientPlayer', message, extra } = req.body || {};

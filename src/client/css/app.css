@@ -959,6 +959,499 @@ html.platform-mac .app-header {
 .player-container:fullscreen .video-stage { flex: 1; min-height: 0; }
 .theater-sidebar { flex-shrink: 0; }
 html.platform-win .app-header { padding-right: 160px; }
+
+/* ================= 剧星榜（演员排行榜）与主页弹窗 ================= */
+.actor-ranking-container {
+  padding: 20px 32px 60px 32px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.actor-banner {
+  background: linear-gradient(135deg, rgba(255, 51, 85, 0.12) 0%, rgba(20, 23, 31, 0.9) 100%);
+  border: 1px solid rgba(255, 51, 85, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 22px 28px;
+  margin-bottom: 24px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.actor-banner-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.actor-banner-icon {
+  font-size: 24px;
+}
+
+.actor-banner-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.actor-rank-date-badge {
+  font-size: 12px;
+  background: rgba(255, 51, 85, 0.2);
+  color: #ff6b85;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 51, 85, 0.3);
+  font-weight: 500;
+}
+
+.actor-banner-desc {
+  font-size: 13.5px;
+  color: var(--text-sub);
+  line-height: 1.5;
+}
+
+.actor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.actor-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.actor-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(255, 51, 85, 0.5);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.5);
+}
+
+.actor-card.rank-top-1 {
+  border-color: rgba(255, 215, 0, 0.4);
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.08) 0%, var(--bg-card) 50%);
+}
+
+.actor-card.rank-top-2 {
+  border-color: rgba(220, 220, 230, 0.35);
+  background: linear-gradient(180deg, rgba(220, 220, 230, 0.06) 0%, var(--bg-card) 50%);
+}
+
+.actor-card.rank-top-3 {
+  border-color: rgba(205, 127, 50, 0.35);
+  background: linear-gradient(180deg, rgba(205, 127, 50, 0.06) 0%, var(--bg-card) 50%);
+}
+
+.actor-card-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.actor-rank-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-sub);
+}
+
+.actor-rank-badge.top-1 {
+  background: linear-gradient(135deg, #ffd700, #ffaa00);
+  color: #1a1000;
+  box-shadow: 0 2px 8px rgba(255, 215, 0, 0.4);
+}
+
+.actor-rank-badge.top-2 {
+  background: linear-gradient(135deg, #e6e8eb, #b0b5be);
+  color: #11141a;
+  box-shadow: 0 2px 8px rgba(200, 205, 215, 0.3);
+}
+
+.actor-rank-badge.top-3 {
+  background: linear-gradient(135deg, #e59866, #ba4a00);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(205, 127, 50, 0.3);
+}
+
+.rank-medal {
+  font-size: 13px;
+}
+
+.actor-rank-change {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.actor-rank-change.up {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.actor-rank-change.down {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.actor-rank-change.same {
+  color: var(--text-dim);
+}
+
+.actor-avatar-wrapper {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  transition: transform 0.3s ease, border-color 0.3s ease;
+  background-color: #1a1d26;
+  flex-shrink: 0;
+}
+
+.actor-card:hover .actor-avatar-wrapper {
+  transform: scale(1.06);
+  border-color: var(--accent);
+}
+
+.actor-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.actor-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.actor-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actor-score-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ff3355;
+  background: rgba(255, 51, 85, 0.12);
+  padding: 3px 10px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+
+.fire-icon {
+  font-size: 13px;
+}
+
+.actor-tags {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.actor-tag {
+  font-size: 11.5px;
+  color: var(--text-sub);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 2px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.actor-intro {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  max-height: 36px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-bottom: 14px;
+}
+
+.actor-card-footer {
+  margin-top: auto;
+  width: 100%;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.view-works-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  transition: color 0.2s;
+}
+
+.actor-card:hover .view-works-btn {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* 演员骨架屏 */
+.skeleton-actor-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.skeleton-avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background: linear-gradient(100deg, #1c202a 30%, #303747 50%, #1c202a 70%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s infinite;
+}
+
+/* 演员个人主页弹窗 */
+.actor-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: modal-fade-in 0.22s ease-out;
+}
+
+.actor-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  width: min(980px, 100%);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+}
+
+.actor-modal-header {
+  padding: 24px 28px;
+  background: linear-gradient(135deg, rgba(255, 51, 85, 0.1) 0%, rgba(24, 28, 38, 0.95) 100%);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.actor-profile-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex: 1;
+  min-width: 0;
+}
+
+.actor-profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--accent);
+  box-shadow: 0 6px 18px var(--accent-glow);
+  flex-shrink: 0;
+  background-color: #1a1d26;
+}
+
+.actor-profile-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.actor-profile-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.actor-profile-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.actor-rank-pill {
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(255, 215, 0, 0.15);
+  color: #ffd700;
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 215, 0, 0.3);
+}
+
+.actor-profile-intro {
+  font-size: 13.5px;
+  color: var(--text-sub);
+  line-height: 1.55;
+  margin-bottom: 12px;
+}
+
+.related-celebrities-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.related-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.related-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.related-actor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 12px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.related-actor-chip:hover {
+  background: rgba(255, 51, 85, 0.15);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.related-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #2a2e3b;
+}
+
+.modal-close-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  color: var(--text-sub);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.modal-close-btn:hover {
+  background: rgba(255, 51, 85, 0.2);
+  color: #fff;
+}
+
+.actor-modal-body {
+  padding: 24px 28px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.works-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 18px;
+}
+
+.works-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.works-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.actor-works-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 16px;
+}
+
+.empty-works {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--text-sub);
+  font-size: 14px;
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (max-width: 1250px) {
   .app-header { height: 110px; flex-wrap: wrap; align-content: center; row-gap: 8px; }
   .header-left { width: 100%; }

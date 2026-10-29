@@ -22,6 +22,17 @@ createApp({
     let catalogRequest = 0;
     let submittedKeyword = '';
 
+    // 剧星榜（演员排行榜）状态
+    const actors = ref([]);
+    const actorPage = ref(1);
+    const actorHasMore = ref(false);
+    const actorRankDate = ref('');
+    const loadingActors = ref(false);
+    const activeActor = ref(null);
+    const activeActorDetail = ref(null);
+    const actorWorks = ref([]);
+    const loadingActorWorks = ref(false);
+
     // 剧场模式与播放器
     const videoEl = ref(null);
     const activeSeries = ref(null);
@@ -191,11 +202,17 @@ createApp({
 
     function switchTab(tab) {
       currentTab.value = tab;
-      currentPage.value = 1;
       leaveTheater();
+      closeActorDetail();
       searchKeyword.value = '';
       submittedKeyword = '';
-      loadCatalog();
+      if (tab === 'actors') {
+        actorPage.value = 1;
+        loadActorRankings();
+      } else {
+        currentPage.value = 1;
+        loadCatalog();
+      }
     }
 
     function changePage(delta) {
@@ -205,6 +222,97 @@ createApp({
 
     function goHome() {
       switchTab('hot-drama');
+    }
+
+    // ================= 剧星榜（演员排行榜）逻辑 =================
+
+    async function loadActorRankings() {
+      loadingActors.value = true;
+      try {
+        const response = await fetch(`/api/actors/ranking?page=${actorPage.value}`);
+        if (!response.ok) throw new Error(`加载剧星榜失败 (${response.status})`);
+        const data = await response.json();
+        if (data.success && Array.isArray(data.actors)) {
+          actors.value = data.actors;
+          actorRankDate.value = data.rank_date || '';
+          actorHasMore.value = !!data.has_more;
+        } else {
+          throw new Error(data.error || '获取剧星榜失败');
+        }
+      } catch (err) {
+        console.error('加载剧星榜失败:', err);
+        notify(err.message || '剧星榜加载失败，请重试');
+        actors.value = [];
+        actorHasMore.value = false;
+      } finally {
+        loadingActors.value = false;
+      }
+    }
+
+    function changeActorPage(delta) {
+      actorPage.value = Math.max(1, actorPage.value + delta);
+      loadActorRankings();
+      window.scrollTo?.({ top: 0, behavior: 'smooth' });
+    }
+
+    async function openActorDetail(actor) {
+      if (!actor || !actor.actor_id) return;
+      activeActor.value = actor;
+      activeActorDetail.value = null;
+      actorWorks.value = [];
+      loadingActorWorks.value = true;
+      reportClientLog('INFO', `打开演员主页: ${actor.name} (actorId=${actor.actor_id})`);
+
+      try {
+        const [detailRes, worksRes] = await Promise.allSettled([
+          fetch(`/api/actors/${encodeURIComponent(actor.actor_id)}`).then(r => r.json()),
+          fetch(`/api/actors/${encodeURIComponent(actor.actor_id)}/works?count=30`).then(r => r.json())
+        ]);
+
+        if (detailRes.status === 'fulfilled' && detailRes.value?.success) {
+          activeActorDetail.value = detailRes.value.actor;
+        }
+        if (worksRes.status === 'fulfilled' && worksRes.value?.success) {
+          actorWorks.value = worksRes.value.works || [];
+        }
+      } catch (err) {
+        console.error('获取演员详情失败:', err);
+      } finally {
+        loadingActorWorks.value = false;
+      }
+    }
+
+    function closeActorDetail() {
+      activeActor.value = null;
+      activeActorDetail.value = null;
+      actorWorks.value = [];
+    }
+
+    function switchToRelatedActor(rel) {
+      if (!rel || !rel.actor_id) return;
+      openActorDetail({
+        actor_id: rel.actor_id,
+        name: rel.name,
+        avatar: rel.avatar,
+        intro: rel.intro,
+        score: ''
+      });
+    }
+
+    function playActorWork(work) {
+      closeActorDetail();
+      return openTheater(work);
+    }
+
+    function getRankChangeClass(change) {
+      if (!change) return 'same';
+      if (change.type === 1) return 'up';
+      if (change.type === 2) return 'down';
+      return 'same';
+    }
+
+    function onAvatarError(e) {
+      e.target.src = '/assets/app-icon.png';
     }
 
     // ================= 沉浸式剧场与播放逻辑 =================
@@ -598,6 +706,14 @@ createApp({
       if (isTextEditingTarget(e.target)) return;
       if (e.target?.tagName === 'SELECT') return;
 
+      if (e.code === 'Escape' || e.key === 'Escape') {
+        if (activeActor.value) {
+          e.preventDefault();
+          closeActorDetail();
+          return;
+        }
+      }
+
       if (viewMode.value === 'theater') {
         const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.key?.toLowerCase() === 'k';
         if (isSpace) {
@@ -764,7 +880,24 @@ createApp({
       formatTime,
       isEpisodeWatched,
       onImageError,
-      keepPlayerFocus
+      keepPlayerFocus,
+      actors,
+      actorPage,
+      actorHasMore,
+      actorRankDate,
+      loadingActors,
+      activeActor,
+      activeActorDetail,
+      actorWorks,
+      loadingActorWorks,
+      loadActorRankings,
+      changeActorPage,
+      openActorDetail,
+      closeActorDetail,
+      switchToRelatedActor,
+      playActorWork,
+      getRankChangeClass,
+      onAvatarError
     };
   }
 }).mount('#app');
