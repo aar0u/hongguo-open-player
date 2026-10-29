@@ -11,6 +11,9 @@ const logger = require('./services/logger');
 
 const app = express();
 const PORT = process.env.PORT || 8899;
+// Set HOST=0.0.0.0 to serve other devices on the LAN; any other HOST skips the loopback-only Host check.
+const BIND_HOST = process.env.HOST || '127.0.0.1';
+const LOOPBACK_ONLY = BIND_HOST === '127.0.0.1';
 
 app.use((req, res, next) => {
   res.set({
@@ -26,7 +29,7 @@ app.use((req, res, next) => {
 // Only the local application's own origin may access personal data or trigger downloads.
 app.use((req, res, next) => {
   const hosts = [`127.0.0.1:${req.socket.localPort}`, `localhost:${req.socket.localPort}`];
-  if (!hosts.includes(req.headers.host) ||
+  if ((LOOPBACK_ONLY && !hosts.includes(req.headers.host)) ||
       (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) ||
       ['cross-site', 'same-site'].includes(req.headers['sec-fetch-site'])) {
     return res.status(403).json({ error: '仅允许本地播放器访问' });
@@ -289,7 +292,7 @@ async function startServer(preferredPort = PORT) {
       // listening event guarantees that server.address() is available.
       server.once('error', onError);
       server.once('listening', onListening);
-      server.listen(port, '127.0.0.1');
+      server.listen(port, BIND_HOST);
     });
   }
 

@@ -1,0 +1,27 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.hongguo.tv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.hongguo.tv'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        // Default backend address; override at build time with -PserverUrl=... or at runtime with the Menu key.
+        buildConfigField 'String', 'SERVER_URL', "\"${project.findProperty('serverUrl') ?: 'http://192.168.31.217:8899/'}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

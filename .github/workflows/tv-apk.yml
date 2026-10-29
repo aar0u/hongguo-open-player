@@ -1,0 +1,38 @@
+name: Build TV APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: Default backend address baked into the APK
+        default: http://192.168.31.217:8899/
+  push:
+    branches:
+      - tv-lan
+    paths:
+      - 'tv-app/**'
+      - '.github/workflows/tv-apk.yml'
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Build debug APK
+        working-directory: tv-app
+        run: gradle --no-daemon assembleDebug -PserverUrl="${{ inputs.server_url || 'http://192.168.31.217:8899/' }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hongguo-tv-apk
+          path: tv-app/app/build/outputs/apk/debug/app-debug.apk

@@ -5,3 +5,5 @@ data/*.json
 .DS_Store
 *.log
 *.apk
+tv-app/.gradle/
+tv-app/**/build/
