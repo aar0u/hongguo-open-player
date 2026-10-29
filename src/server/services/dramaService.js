@@ -137,7 +137,7 @@ class DramaService {
     if (!vid) throw new Error('缺少 vid 参数');
     const t0 = Date.now();
     logger.info('DramaService', `解析单集播放元信息 vid=${vid}, quality=${quality}`);
-    const playInfo = await appSource.fetchAppPlayUrl(String(vid), { quality });
+    const playInfo = await appSource.fetchAppPlayUrl(String(vid), { quality, allowLowerQuality: true });
     if (!playInfo || !playInfo.url) {
       logger.error('DramaService', `未能解析到有效的播放地址 vid=${vid}`);
       throw new Error('未能解析到有效的播放地址');
