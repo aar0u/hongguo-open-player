@@ -14,6 +14,9 @@
   // view is positioned below the header, so it must follow the new height.
   css.textContent = 'html.np-on,html.np-on body,html.np-on .theater-view,html.np-on .player-container,'
     + 'html.np-on .video-stage,html.np-on .video-element{background:transparent!important}'
+    // Newer WebViews paint a grey default poster with a big play icon on a <video> that has no frame; the
+    // native surface underneath is the real picture, so keep the element itself invisible.
+    + 'html.np-on .video-element{opacity:0!important}'
     + '.app-header{height:84px!important;padding:0 28px!important;gap:20px!important}'
     + '.brand-icon{width:40px!important;height:40px!important}'
     + '.brand-name{font-size:19px!important}'
