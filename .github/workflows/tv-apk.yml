@@ -8,7 +8,7 @@ on:
         default: http://192.168.31.217:8899/
   push:
     branches:
-      - tv-lan
+      - tv
     paths:
       - 'tv-app/**'
       - '.github/workflows/tv-apk.yml'
