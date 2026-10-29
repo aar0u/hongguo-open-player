@@ -249,6 +249,78 @@ test('fetchActorRankings handles pagination and in-memory session caching', asyn
   assert.equal(resPage3.actors[0].name, '演员_off20');
 });
 
+test('fetchActorRankings isolates cache and session cursors by pageLimit', async () => {
+  clearActorSession();
+  const requestsMade = [];
+
+  const mockPagedRequest = async (signed) => {
+    const urlObj = new URL(signed.url);
+    const limit = Number(urlObj.searchParams.get('limit') || 20);
+    const offset = Number(urlObj.searchParams.get('offset') || 0);
+    requestsMade.push({ limit, offset });
+
+    const ugc_user_data = [];
+    for (let i = 0; i < limit; i++) {
+      const idx = offset + i;
+      ugc_user_data.push({
+        user_info: {
+          base_info: {
+            actor_id_str: `7600000000000000${idx}`,
+            user_name: `演员_${idx + 1}`
+          }
+        },
+        rec_text_item: { RecommendText: `${1000 - idx}万人气` }
+      });
+    }
+
+    return {
+      code: 0,
+      data: {
+        has_more: true,
+        next_offset: offset + limit,
+        session_id: `sess-limit-${limit}`,
+        cell_view: {
+          cell_data_json: JSON.stringify({ rank_list_date: '2026年10月29日' }),
+          cell_data: [{ ugc_user_data }]
+        }
+      }
+    };
+  };
+
+  // 1. Request limit=5, page=1
+  const resLimit5P1 = await fetchActorRankings({ page: 1, limit: 5, request: mockPagedRequest });
+  assert.equal(resLimit5P1.success, true);
+  assert.equal(resLimit5P1.actors.length, 5);
+  assert.equal(resLimit5P1.actors[0].rank, 1);
+  assert.equal(resLimit5P1.actors[4].rank, 5);
+  assert.equal(requestsMade.length, 1);
+  assert.deepEqual(requestsMade[0], { limit: 5, offset: 0 });
+
+  // 2. Request limit=20, page=1 -> Must NOT return cached 5 actors! Must isolate and fetch 20 actors
+  const resLimit20P1 = await fetchActorRankings({ page: 1, limit: 20, request: mockPagedRequest });
+  assert.equal(resLimit20P1.success, true);
+  assert.equal(resLimit20P1.actors.length, 20);
+  assert.equal(resLimit20P1.actors[0].rank, 1);
+  assert.equal(resLimit20P1.actors[19].rank, 20);
+  assert.equal(requestsMade.length, 2);
+  assert.deepEqual(requestsMade[1], { limit: 20, offset: 0 });
+
+  // 3. Request limit=20, page=2 -> Must use session for limit=20 (offset=20, not offset=5)
+  const resLimit20P2 = await fetchActorRankings({ page: 2, limit: 20, request: mockPagedRequest });
+  assert.equal(resLimit20P2.success, true);
+  assert.equal(resLimit20P2.actors.length, 20);
+  assert.equal(resLimit20P2.actors[0].rank, 21); // TOP 21 correctly corresponds to actor_21
+  assert.equal(resLimit20P2.actors[0].name, '演员_21');
+  assert.equal(requestsMade.length, 3);
+  assert.deepEqual(requestsMade[2], { limit: 20, offset: 20 });
+
+  // 4. Request limit=5, page=1 again -> Hits limit=5 cache without disturbing limit=20
+  const resLimit5P1Cached = await fetchActorRankings({ page: 1, limit: 5, request: mockPagedRequest });
+  assert.equal(resLimit5P1Cached.from_cache, true);
+  assert.equal(resLimit5P1Cached.actors.length, 5);
+  assert.equal(requestsMade.length, 3);
+});
+
 test('fetchActorDetail and fetchActorWorks parse profiles, related actors and drama works', async () => {
   // 1. Detail parsing
   const mockDetailRequest = async () => ({
