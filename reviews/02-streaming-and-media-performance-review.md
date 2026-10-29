@@ -1,4 +1,4 @@
-# 红果开放播放器 (Hongguo Open Player) 流媒体性能与解密架构审查报告
+# 红果开源播放器 (Hongguo Open Player) 流媒体性能与解密架构审查报告
 
 > **审查日期**：2026-10-28  
 > **审查对象**：`src/server/services/streamService.js`、`src/server/native/hongguo.js` 及流媒体处理流水线  

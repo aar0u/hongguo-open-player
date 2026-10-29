@@ -228,7 +228,7 @@ function startServer(preferredPort = PORT) {
   return new Promise((resolve, reject) => {
     const server = app.listen(preferredPort, '127.0.0.1', () => {
       const actualPort = server.address().port;
-      logger.info('Server', `🚀 红果开放播放器服务已启动: http://127.0.0.1:${actualPort}`);
+      logger.info('Server', `🚀 红果开源播放器服务已启动: http://127.0.0.1:${actualPort}`);
       logger.info('Server', `📄 运行日志文件: ${logger.getLogFilePath()}`);
       resolve({ app, server, port: actualPort });
     });

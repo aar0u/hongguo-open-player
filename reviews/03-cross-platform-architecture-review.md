@@ -1,4 +1,4 @@
-# 红果开放播放器 (Hongguo Open Player) 跨平台桌面架构与工程质量审查报告
+# 红果开源播放器 (Hongguo Open Player) 跨平台桌面架构与工程质量审查报告
 
 > **审查基准**：Git `main` 分支最新提交  
 > **审查领域**：Electron 桌面主进程架构、macOS / Windows 跨平台系统融合度、持久化存储与文件系统兼容性、打包工程化与 CI/CD 流水线  
@@ -10,7 +10,7 @@
 ## 1. 架构总览与健壮性评分
 
 ### 1.1 总体架构评价
-红果开放播放器在架构设计上采用了 **“轻量内嵌 Express 核心引擎 + Chromium 原生窗口渲染 + 纯前端解耦交互”** 的经典桌面应用形态。整体代码干净利落，无原生 C/C++ 动态编译依赖（node-gyp），天然具备优良的跨平台交叉编译基础与轻量化优势。内置的 MP4 CENC 实时流式解密代理与 HTTP Range 分片并发加速机制在功能验证层表现优异。
+红果开源播放器在架构设计上采用了 **“轻量内嵌 Express 核心引擎 + Chromium 原生窗口渲染 + 纯前端解耦交互”** 的经典桌面应用形态。整体代码干净利落，无原生 C/C++ 动态编译依赖（node-gyp），天然具备优良的跨平台交叉编译基础与轻量化优势。内置的 MP4 CENC 实时流式解密代理与 HTTP Range 分片并发加速机制在功能验证层表现优异。
 
 然而，从**资深跨平台桌面工程标准（macOS + Windows 生产级交付）**的视角审视，当前项目在**系统级融合度、Windows 平台特异性适配、进程生命周期竞态防护、存储耐久性与发布工程化**方面仍存在若干关键隐患与架构债务。
 
@@ -168,7 +168,7 @@ async function createWindow() {
   const { startServer } = require('../server/index.js');
 ```
 - **环境变量注入时机过晚**：`process.env.HONGGUO_DATA_DIR` 的设置被放在了 `createWindow` 内部。如果在主进程启动时有任何模块在顶部提前 `require` 了 `storeService`（例如用于状态预热或迁移），由于此时 `process.env.HONGGUO_DATA_DIR` 为 `undefined`，`StoreService` 将回退到 `../../../data`。在打包后的只读 ASAR 环境中，向该路径写入将直接抛出 `EROFS: read-only file system` 异常崩溃。
-- **开发与打包环境 userData 隔离差异**：在 `main.js` 中未显式执行 `app.setName('红果开放播放器')`。在未打包的开发环境执行 `electron .` 时，`app.getPath('userData')` 的目录名可能为 `Electron` 或 `hongguo-open-player`，而打包后为 `红果开放播放器`，导致开发与生产的数据无法平滑共享。
+- **开发与打包环境 userData 隔离差异**：在 `main.js` 中未显式执行 `app.setName('红果开源播放器')`。在未打包的开发环境执行 `electron .` 时，`app.getPath('userData')` 的目录名可能为 `Electron` 或 `hongguo-open-player`，而打包后为 `红果开源播放器`，导致开发与生产的数据无法平滑共享。
 
 #### 3.3.2 原子写入在 Windows NTFS 下的锁冲突隐患
 查看 `storeService.js#L38-L48`：
@@ -223,7 +223,7 @@ windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
   "allowToChangeInstallationDirectory": true,
   "createDesktopShortcut": true,
   "createStartMenuShortcut": true,
-  "shortcutName": "红果开放播放器"
+  "shortcutName": "红果开源播放器"
 }
 ```
 配置质量总体良好，允许用户自定义安装路径并在桌面和开始菜单创建中文快捷方式。建议补充 `perMachine: false`（默认安装至当前用户目录，免去 Windows UAC 提权干扰）以及 `artifactName` 规范化命名模板。
@@ -239,7 +239,7 @@ windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
 ```
 在 macOS Sonoma (14.x) 及 macOS Sequoia (15.x) 中，苹果大幅收紧了未签名软件的限制。用户从浏览器下载未签名的 DMG/ZIP 后，操作系统会自动附加上 `com.apple.quarantine` 扩展属性，用户双击打开会提示“已损坏，无法打开”或拒绝运行。
 虽然开源免费软件通常不具备年度 \$99 的 Apple Developer 证书，但必须在项目 README 及发布 Release 说明中显式标注隔离属性移除指令：
-`xattr -cr /Applications/红果开放播放器.app`
+`xattr -cr /Applications/红果开源播放器.app`
 
 #### 3.4.4 GitHub Actions CI/CD 流水线健壮性审查
 审查 [`.github/workflows/build-release.yml`](file:///Users/zfdang/workspaces/hongguo-open-player/.github/workflows/build-release.yml)：
@@ -276,7 +276,7 @@ const { app, BrowserWindow, Menu, shell, dialog } = require('electron');
 const path = require('path');
 
 // 1. 在主进程最顶层尽早初始化跨平台数据路径与 App 标识
-app.setName('红果开放播放器');
+app.setName('红果开源播放器');
 const defaultUserData = app.getPath('userData');
 process.env.HONGGUO_DATA_DIR = process.env.HONGGUO_DATA_DIR || path.join(defaultUserData, 'data');
 
@@ -323,7 +323,7 @@ async function createWindow() {
       height: 840,
       minWidth: 960,
       minHeight: 640,
-      title: '红果开放播放器',
+      title: '红果开源播放器',
       backgroundColor: '#0f1015',
       autoHideMenuBar: !isMac,
       webPreferences: {
@@ -395,17 +395,17 @@ function setupMenu() {
     ...(isMac
       ? [
           {
-            label: '红果开放播放器',
+            label: '红果开源播放器',
             submenu: [
-              { role: 'about', label: '关于 红果开放播放器' },
+              { role: 'about', label: '关于 红果开源播放器' },
               { type: 'separator' },
               { role: 'services', label: '服务' },
               { type: 'separator' },
-              { role: 'hide', label: '隐藏 红果开放播放器' },
+              { role: 'hide', label: '隐藏 红果开源播放器' },
               { role: 'hideOthers', label: '隐藏其他' },
               { role: 'unhide', label: '全部显示' },
               { type: 'separator' },
-              { role: 'quit', label: '退出 红果开放播放器' }
+              { role: 'quit', label: '退出 红果开源播放器' }
             ]
           }
         ]
@@ -469,12 +469,12 @@ function setupMenu() {
         ...(!isMac
           ? [
               {
-                label: '关于 红果开放播放器',
+                label: '关于 红果开源播放器',
                 click: () => {
                   dialog.showMessageBox({
                     type: 'info',
                     title: '关于',
-                    message: '红果开放播放器',
+                    message: '红果开源播放器',
                     detail: `版本: ${app.getVersion()}\n纯净原生跨平台桌面短剧播放客户端\n支持 macOS 与 Windows 原生硬解与实时流式解密。`
                   });
                 }
@@ -732,7 +732,7 @@ function syncMediaSession(series, episodeIndex, isPlayingNow) {
   if (series) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: `${series.series_title} - 第 ${episodeIndex} 集`,
-      artist: '红果开放播放器',
+      artist: '红果开源播放器',
       album: series.series_title,
       artwork: series.cover ? [{ src: series.cover, sizes: '512x512', type: 'image/jpeg' }] : []
     });
@@ -790,7 +790,7 @@ on:
 
 ## 5. 审查总结与推进建议
 
-红果开放播放器在架构骨干上表现出了极高的代码规范性和清晰度，CENC 流媒体动态解密代理的设计尤为惊艳。通过落地本报告提出的 4 组核心改进方案：
+红果开源播放器在架构骨干上表现出了极高的代码规范性和清晰度，CENC 流媒体动态解密代理的设计尤为惊艳。通过落地本报告提出的 4 组核心改进方案：
 1. **完善 Windows WCO 一体化标题栏**，消除双层标题栏，极大提升 Windows 用户的使用质感；
 2. **重塑持久化存储的原子性与容灾机制**，规避 Windows 文件系统特有的 `EPERM` 锁崩溃与数据损坏；
 3. **加固 Electron 生命周期与单实例锁定**，防止异步窗口创建竞态并补充系统级错误弹窗；

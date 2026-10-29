@@ -53,7 +53,7 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   assert.equal(windows[1].open({ url: 'file:///etc/passwd' }).action, 'deny');
   const helpMenu = lastMenuTemplate.find(m => m.label === '帮助');
   assert.ok(helpMenu);
-  const aboutHelp = helpMenu.submenu.find(i => i.label === '关于 红果开放播放器');
+  const aboutHelp = helpMenu.submenu.find(i => i.label === '关于 红果开源播放器');
   assert.ok(aboutHelp);
   aboutHelp.click();
   await new Promise(resolve => setImmediate(resolve));
@@ -62,7 +62,7 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
 
 test('packaging artifact names use english hongguo-open-player without breaking chinese productName', () => {
   const pkg = require('../../package.json');
-  assert.equal(pkg.build.productName, '红果开放播放器');
+  assert.equal(pkg.build.productName, '红果开源播放器');
   assert.ok(pkg.build.artifactName.startsWith('${name}-'));
   assert.equal(pkg.build.mac.artifactName, '${name}-${version}-mac-${arch}.${ext}');
   assert.equal(pkg.build.win.artifactName, '${name}-${version}-win-${arch}.${ext}');

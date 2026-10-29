@@ -1,4 +1,4 @@
-# 红果开放播放器 (Hongguo Open Player) 全方位安全审计与漏洞扫描报告
+# 红果开源播放器 (Hongguo Open Player) 全方位安全审计与漏洞扫描报告
 
 - **审计对象**：`hongguo-open-player` (Commit `a5eefda` on `main`)
 - **审计日期**：2026-10-28
