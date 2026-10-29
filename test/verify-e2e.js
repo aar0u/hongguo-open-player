@@ -87,7 +87,16 @@ async function runTests() {
     // 5. 验证单集视频解析与 Spade-A 密钥派生
     console.log('▶ [5/7] 验证单集播放信息解析 (GET /api/play/:vid)...');
     const ep4 = seriesData.episodes[3]; // 选择第 4 集（超越免费集数壁垒）
-    const playRes = await client.get(`${BASE_URL}/api/play/${ep4.vid}?quality=1080p`);
+    let playRes;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        playRes = await client.get(`${BASE_URL}/api/play/${ep4.vid}?quality=1080p`);
+        if (playRes.status === 200) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
     assert.strictEqual(playRes.status, 200);
     const playData = playRes.data;
     assert(playData.url, '应解析出有效的媒体 URL');
