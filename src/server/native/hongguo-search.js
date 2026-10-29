@@ -7,6 +7,7 @@
  * 接口未公开，字段或可用性可能变化：调用方应保留页面嗅探作为兜底。
  */
 const axios = require('axios');
+const { matchesSearchKeyword } = require('./search-relevance');
 
 const SITE_ORIGIN = 'https://hongguoduanju.com';
 const SEARCH_ENDPOINT = `${SITE_ORIGIN}/api/search/result`;
@@ -78,7 +79,7 @@ function tagsOf(video) {
 }
 
 /** 把接口返回的 searchList 转成应用内统一的搜索结果结构。 */
-function parseSearchResponse(payload) {
+function parseSearchResponse(payload, { keyword = '' } = {}) {
   if (payload == null || payload === '') {
     throw new HongguoSearchError('搜索响应为空', 'upstream');
   }
@@ -95,6 +96,7 @@ function parseSearchResponse(payload) {
     throw new HongguoSearchError('搜索返回异常数据', 'format', { fallback: true });
   }
   const results = [];
+  let recognizedCount = 0;
   const seen = new Set();
   for (const item of payload.searchList) {
     const videoData = item?.video_data;
@@ -104,6 +106,9 @@ function parseSearchResponse(payload) {
     const title = cleanText(video?.series_name || video?.series_title || item?.name || video?.title || '');
     if (!/^\d{6,}$/.test(seriesId) || !title || seen.has(seriesId)) continue;
     seen.add(seriesId);
+    recognizedCount++;
+    if (!matchesSearchKeyword(keyword, title, item?.name, video?.series_intro,
+      video?.tags, video?.category_list, video?.celebrities)) continue;
     results.push({
       series_id: seriesId,
       series_title: title,
@@ -115,12 +120,15 @@ function parseSearchResponse(payload) {
     });
   }
   // 有数据但一条都认不出，通常是字段改名；这是解析失败，不是“没有结果”。
-  if (!results.length && payload.searchList.length > 0) {
+  if (!recognizedCount && payload.searchList.length > 0) {
     throw new HongguoSearchError('搜索返回的条目无法识别', 'format', { fallback: true });
   }
   const total = Number(payload.totalCount);
   const totalPages = Number(payload.totalPages);
   const page = Number(payload.pageNum);
+  if (!results.length) {
+    return { results: [], total: 0, totalPages: 0, page: page >= 1 ? page : 1, hasMore: false };
+  }
   return {
     results,
     total: Number.isFinite(total) && total >= 0 ? total : results.length,
@@ -213,7 +221,7 @@ async function searchHongguo(keyword, options = {}) {
     try {
       const attemptTimeout = Math.min(timeout, Math.max(1000, remaining()));
       const payload = await request(kw, page, { timeout: attemptTimeout });
-      const parsed = parseSearchResponse(payload);
+      const parsed = parseSearchResponse(payload, { keyword: kw });
       const value = { ...parsed, keyword: kw };
       if (useCache) remember(key, value);
       return value;
