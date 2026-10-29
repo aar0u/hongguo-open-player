@@ -69,10 +69,12 @@ createApp({
       isScrubbing.value = true;
       event.target.setPointerCapture?.(event.pointerId);
     }
-    function finishScrubbing() {
+    function finishScrubbing(event) {
       isScrubbing.value = false;
       showPreview.value = false;
       saveProgressNow();
+      event?.target?.blur?.();
+      keepPlayerFocus();
     }
     function notify(message) {
       toastText.value = message;
@@ -86,6 +88,15 @@ createApp({
     }
     function fullscreenChanged() {
       if (!document.fullscreenElement) fullscreenExitAt = Date.now();
+    }
+    function reportClientLog(level, message, extra) {
+      try {
+        fetch('/api/client-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level, tag: 'ClientPlayer', message, extra })
+        }).catch(() => {});
+      } catch (_) {}
     }
 
     // 当前选集分组
@@ -219,6 +230,7 @@ createApp({
       const request = ++theaterRequest;
       videoErrorMessage.value = '';
       isBuffering.value = true;
+      reportClientLog('INFO', `打开短剧剧场: 《${drama.series_title || ''}》(seriesId=${drama.series_id})`);
       try {
         const detail = await fetch(`/api/series/${encodeURIComponent(drama.series_id)}`).then(r => r.json());
         if (request !== theaterRequest) return;
@@ -261,6 +273,7 @@ createApp({
         viewMode.value = 'theater';
 
         await nextTick();
+        keepPlayerFocus();
         if (videoEl.value) {
           videoEl.value.play().catch(e => {
             console.log('自动播放需要用户交互唤醒:', e.message);
@@ -300,6 +313,7 @@ createApp({
             isBuffering.value = false;
           });
         }
+        keepPlayerFocus();
       });
     }
 
@@ -332,6 +346,7 @@ createApp({
       } else {
         videoEl.value.pause();
       }
+      keepPlayerFocus();
     }
 
     function seekByClick(e) {
@@ -340,26 +355,32 @@ createApp({
       const clickX = e.clientX - rect.left;
       const targetPercent = Math.max(0, Math.min(1, clickX / rect.width));
       videoEl.value.currentTime = targetPercent * duration.value;
+      keepPlayerFocus();
     }
 
-    function changeSpeed() {
+    function changeSpeed(event) {
       if (videoEl.value) {
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
       }
+      event?.target?.blur?.();
+      keepPlayerFocus();
     }
 
-    function changeVolume() {
+    function changeVolume(event) {
       if (videoEl.value) {
         videoEl.value.volume = parseFloat(volume.value);
         isMuted.value = (videoEl.value.volume === 0);
         videoEl.value.muted = isMuted.value;
       }
+      event?.target?.blur?.();
+      keepPlayerFocus();
     }
 
     function toggleMute() {
       if (!videoEl.value) return;
       isMuted.value = !isMuted.value;
       videoEl.value.muted = isMuted.value;
+      keepPlayerFocus();
     }
 
     // 画面自适应模式: 'contain' (完整居中) | 'cover' (铺满视口)
@@ -367,6 +388,7 @@ createApp({
     function toggleFitMode() {
       fitMode.value = fitMode.value === 'contain' ? 'cover' : 'contain';
       notify(fitMode.value === 'contain' ? '画面比例: 完整自适应' : '画面比例: 铺满全屏');
+      keepPlayerFocus();
     }
 
     // 单击播放/暂停，双击切换全屏 (250ms 消抖防冲突)
@@ -394,6 +416,7 @@ createApp({
       } else {
         document.exitFullscreen().catch(console.error);
       }
+      keepPlayerFocus();
     }
 
     async function toggleFavCurrent() {
@@ -414,6 +437,8 @@ createApp({
       } catch (err) {
         console.error('收藏切换失败:', err);
         notify('收藏保存失败，请稍后重试');
+      } finally {
+        keepPlayerFocus();
       }
     }
 
@@ -425,6 +450,7 @@ createApp({
       markWatched(activeEpisodeIndex.value);
       if (navigator.mediaSession) navigator.mediaSession.playbackState = 'playing';
       isBuffering.value = false;
+      reportClientLog('INFO', `播放器起播: 《${activeSeries.value?.series_title || ''}》 第 ${activeEpisodeIndex.value} 集`);
     }
 
     function onCanPlay(event) {
@@ -449,6 +475,7 @@ createApp({
         if (navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
           navigator.mediaSession.metadata = new MediaMetadata({ title: `${activeSeries.value?.series_title || ''} · 第 ${activeEpisodeIndex.value} 集`, artist: '红果开放播放器' });
         }
+        reportClientLog('INFO', `视频元数据解析就绪: 《${activeSeries.value?.series_title || ''}》 第 ${activeEpisodeIndex.value} 集, 时长=${formatTime(duration.value)}, 画面=${videoEl.value.videoWidth || 0}x${videoEl.value.videoHeight || 0}`);
         videoEl.value.playbackRate = parseFloat(playbackRate.value);
         if (pendingResumeSec > 0 && pendingResumeSec < duration.value) {
           try {
@@ -485,6 +512,8 @@ createApp({
       isBuffering.value = false;
       if (e?.target && e.target !== videoEl.value) return;
       const code = videoEl.value?.error?.code;
+      const message = videoEl.value?.error?.message || '';
+      reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
       videoErrorMessage.value = code === 3 || code === 4
         ? '视频格式无法解码；请重试或选择其他分集，并检查系统解码器'
         : '视频加载失败，请检查网络后重试';
@@ -546,38 +575,61 @@ createApp({
       e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect fill="%23222" width="100%" height="100%"/><text fill="%23777" font-size="20" font-family="sans-serif" x="50%" y="50%" text-anchor="middle">暂无封面</text></svg>';
     }
 
-    // ================= 键盘快捷键监听 =================
+    // ================= 键盘快捷键监听与焦点管理 =================
+
+    function keepPlayerFocus() {
+      if (viewMode.value !== 'theater') return;
+      const container = document.querySelector?.('.player-container');
+      if (container && document.activeElement !== container) {
+        container.focus?.({ preventScroll: true });
+      }
+    }
+
+    function isTextEditingTarget(target) {
+      if (!target) return false;
+      if (target.isContentEditable) return true;
+      const tag = target.tagName;
+      if (tag === 'TEXTAREA') return true;
+      if (tag === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(target.type)) return true;
+      return false;
+    }
 
     function handleKeyDown(e) {
-      if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(e.target.tagName) || e.target.isContentEditable) return;
+      if (isTextEditingTarget(e.target)) return;
+      if (e.target?.tagName === 'SELECT') return;
 
       if (viewMode.value === 'theater') {
-        if (e.code === 'Space' || e.key === 'k') {
+        const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar' || e.key?.toLowerCase() === 'k';
+        if (isSpace) {
           e.preventDefault();
+          e.target?.blur?.();
           togglePlay();
           showOSD(videoEl.value?.paused ? '已暂停' : '继续播放');
-        } else if (e.code === 'ArrowUp') {
+        } else if (e.code === 'ArrowUp' || e.code === 'PageUp' || e.key === 'ArrowUp' || e.key === 'PageUp') {
           e.preventDefault();
+          e.target?.blur?.();
           playPrevEpisode();
-        } else if (e.code === 'ArrowDown') {
+        } else if (e.code === 'ArrowDown' || e.code === 'PageDown' || e.key === 'ArrowDown' || e.key === 'PageDown') {
           e.preventDefault();
+          e.target?.blur?.();
           playNextEpisode();
-        } else if (e.code === 'ArrowLeft') {
+        } else if (e.code === 'ArrowLeft' || e.key === 'ArrowLeft') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.max(0, videoEl.value.currentTime - 5);
           showOSD('快退 5 秒');
-        } else if (e.code === 'ArrowRight') {
+        } else if (e.code === 'ArrowRight' || e.key === 'ArrowRight') {
           e.preventDefault();
           if (videoEl.value) videoEl.value.currentTime = Math.min(duration.value, videoEl.value.currentTime + 5);
           showOSD('快进 5 秒');
-        } else if (e.key.toLowerCase() === 'm') {
+        } else if (e.key?.toLowerCase() === 'm') {
           e.preventDefault();
           toggleMute();
           showOSD(isMuted.value ? '静音' : '开启声音');
-        } else if (e.key === 'f' || e.key === 'F') {
+        } else if (e.key?.toLowerCase() === 'f') {
           e.preventDefault();
+          e.target?.blur?.();
           toggleFullscreen();
-        } else if (e.code === 'Escape') {
+        } else if (e.code === 'Escape' || e.key === 'Escape') {
           if (document.fullscreenElement) { document.exitFullscreen().catch(console.error); return; }
           if (Date.now() - fullscreenExitAt < 300) return;
           closeTheater();
@@ -585,9 +637,41 @@ createApp({
       }
     }
 
+    function handleGlobalPointerDown(e) {
+      if (viewMode.value !== 'theater') return;
+      if (isTextEditingTarget(e.target)) return;
+      const btn = e.target?.closest?.('button');
+      if (btn) {
+        btn.blur?.();
+      }
+    }
+
+    function handleGlobalFocusIn(e) {
+      if (viewMode.value !== 'theater') return;
+      if (isTextEditingTarget(e.target)) return;
+      // 避免控制按钮、全屏按钮、选集方块或滑块截留焦点，保持焦点常驻在播放器主体上
+      if (e.target?.tagName === 'BUTTON' || (e.target?.tagName === 'INPUT' && e.target.type === 'range') || e.target?.tagName === 'SELECT') {
+        e.target.blur?.();
+        keepPlayerFocus();
+      }
+    }
+
+    function handleGlobalClick(e) {
+      if (viewMode.value !== 'theater') return;
+      if (isTextEditingTarget(e.target)) return;
+      const btn = e.target?.closest?.('button');
+      if (btn) {
+        btn.blur?.();
+      }
+      keepPlayerFocus();
+    }
+
     onMounted(() => {
       loadCatalog();
       window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('click', handleGlobalClick);
+      document.addEventListener?.('pointerdown', handleGlobalPointerDown, true);
+      document.addEventListener?.('focusin', handleGlobalFocusIn);
       window.addEventListener('pagehide', saveProgressNow);
       document.addEventListener?.('fullscreenchange', fullscreenChanged);
       if (navigator.mediaSession) {
@@ -606,6 +690,9 @@ createApp({
 
     onUnmounted(() => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('click', handleGlobalClick);
+      document.removeEventListener?.('pointerdown', handleGlobalPointerDown, true);
+      document.removeEventListener?.('focusin', handleGlobalFocusIn);
       window.removeEventListener('pagehide', saveProgressNow);
       document.removeEventListener?.('fullscreenchange', fullscreenChanged);
       clearTimeout(toastTimer); clearTimeout(osdTimer);
@@ -676,7 +763,8 @@ createApp({
       retryCurrentEpisode,
       formatTime,
       isEpisodeWatched,
-      onImageError
+      onImageError,
+      keepPlayerFocus
     };
   }
 }).mount('#app');

@@ -19,8 +19,9 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   let starts = 0;
   const context = { console, process: { platform, env: {} }, __dirname: '/repo/src/electron',
     require(name) {
-      if (name === 'electron') return { app, BrowserWindow: Window, Menu: { buildFromTemplate() {}, setApplicationMenu() {} }, shell: { openExternal: async () => {} } };
+      if (name === 'electron') return { app, BrowserWindow: Window, Menu: { buildFromTemplate() {}, setApplicationMenu() {} }, shell: { openExternal: async () => {}, openPath: async () => {} }, dialog: { showErrorBox() {}, showMessageBox() {} } };
       if (name === '../server/index.js') return { startServer: async () => { starts++; return { server: { close() {} }, port: 8899 }; } };
+      if (name === '../server/services/logger') return require('../../src/server/services/logger');
       return require(name);
     } };
   vm.runInNewContext(fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8'), context);

@@ -7,6 +7,7 @@ const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
 const { normalizeDownloadQuality } = require('../native/download-quality');
 const { webMediaRequestOptions } = require('../native/web-media-guard');
+const logger = require('./logger');
 
 class StreamService {
   constructor({ requestOptions = webMediaRequestOptions } = {}) {
@@ -121,7 +122,9 @@ class StreamService {
       const host = new URL(variant.url).hostname;
       const t0 = Date.now();
       const buffer = await this.downloadWithParallelRanges(variant.url, variant.userAgent, timeoutMs, combined);
-      console.log(`[StreamService] ⚡ 并发分片加速从 [${host}] 下载完毕: ${buffer.length} 字节，耗时 ${Date.now() - t0}ms`);
+      const duration = Date.now() - t0;
+      const speed = (buffer.length / 1024 / 1024 / Math.max(0.001, duration / 1000)).toFixed(2);
+      logger.info('StreamService', `⚡ 并发分片加速从 [${host}] 下载完毕: ${buffer.length} 字节, 耗时 ${duration}ms, 平均速率: ${speed} MB/s`);
       return { buffer, variant };
     };
 
@@ -227,6 +230,8 @@ class StreamService {
   }
 
   async loadBuffer(vid, quality, signal) {
+    const t0 = Date.now();
+    logger.info('StreamService', `[Decrypt] 开始全量拉取并解密视频: vid=${vid}, quality=${quality}`);
     const playInfo = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
     signal.throwIfAborted();
     if (!playInfo?.url) throw new Error('未获取到有效的视频流链接');
@@ -234,7 +239,9 @@ class StreamService {
     signal.throwIfAborted();
     const contentKey = variant.contentKey || playInfo.contentKey;
     const key = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(contentKey || '', 'hex');
+    const tDecrypt = Date.now();
     const decrypted = decryptMp4Buffer(buffer, key);
+    logger.info('StreamService', `[Decrypt] 全集视频解密完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 解密耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
     this.cache.set(`${vid}:${quality}`, { buffer: decrypted, size: decrypted.length });
     this.pruneCache();
     return decrypted;
@@ -270,13 +277,17 @@ class StreamService {
       if (metadataOnly) {
         const controller = new AbortController();
         this.planPrefetch = controller;
-        this.getStreamingPlan(String(vid), quality, controller.signal).catch(error => {
-          if (!controller.signal.aborted) console.warn('Metadata prefetch failed:', error.message);
+        this.getStreamingPlan(String(vid), quality, controller.signal).then(() => {
+          logger.info('StreamService', `[Prefetch] 成功预热下一集流分片元数据: vid=${vid}`);
+        }).catch(error => {
+          if (!controller.signal.aborted) logger.warn('StreamService', `[Prefetch] 下一集元数据预热失败: ${error.message}`);
         }).finally(() => { if (this.planPrefetch === controller) this.planPrefetch = null; });
         return;
       }
-      this.getDecryptedBuffer(vid, quality, { background: true }).catch(err => {
-        console.warn(`[StreamService] 预加载分集 ${vid} 失败:`, err.message);
+      this.getDecryptedBuffer(vid, quality, { background: true }).then(() => {
+        logger.info('StreamService', `[Prefetch] 成功后台预解密下一集视频: vid=${vid}`);
+      }).catch(err => {
+        logger.warn('StreamService', `[Prefetch] 预加载分集 ${vid} 失败: ${err.message}`);
       });
     }, 4000);
     timer.unref?.();
@@ -302,20 +313,27 @@ class StreamService {
     const key = `${vid}:${quality}`;
     const cached = this.plans.get(key);
     if (cached?.expires > Date.now()) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
+    const t0 = Date.now();
+    logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
     const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
     let lastError;
     for (const variant of info.variants?.length ? info.variants : [info]) {
       signal.throwIfAborted();
       try {
         const plan = await prepareRangeMedia({ ...variant, contentKey: variant.contentKey || info.contentKey }, this.requestOptions, signal);
+        logger.info('StreamService', `流式分片计划构建完成: vid=${vid}, 大小=${plan.size} 字节, 耗时=${Date.now() - t0}ms`);
         this.plans.set(key, { plan, expires: Date.now() + 90000 });
         while (this.plans.size > 8 || [...this.plans.values()].reduce((sum, item) => sum + item.plan.bytes, 0) > this.maxPlanBytes) {
           this.plans.delete(this.plans.keys().next().value);
         }
         return plan;
       } catch (error) {
-        if (error.code === 'RANGE_UNSUPPORTED') return null;
+        if (error.code === 'RANGE_UNSUPPORTED') {
+          logger.warn('StreamService', `CDN节点不支持Range，回退至内存缓冲模式: vid=${vid}`);
+          return null;
+        }
         lastError = error;
+        logger.warn('StreamService', `候选CDN节点异常，尝试下一个候选: ${error.message}`);
       }
     }
     throw lastError || new Error('视频源不可用');
@@ -329,8 +347,10 @@ class StreamService {
     this.streamControllers.add(controller);
     const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
     res.once?.('close', disconnected);
+    const t0 = Date.now();
     try {
       const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
+      logger.info('StreamService', `收到流媒体Range请求: vid=${vid}, Range=${req.headers.range || '全量'}, quality=${quality}`);
       const plan = await this.getStreamingPlan(vid, quality, controller.signal);
       if (!plan) return await this.handleBufferedStream(req, res, vid);
       const total = plan.size;
@@ -355,9 +375,11 @@ class StreamService {
       });
       if (req.method === 'HEAD') { res.end(); return; }
       await pipeline(Readable.from(plan.read(start, end, controller.signal), { objectMode: false, highWaterMark: 64 * 1024 }), res);
+      logger.info('StreamService', `流式分片传输完成: vid=${vid}, 区间=${start}-${end}/${total}, 耗时=${Date.now() - t0}ms`);
       this.prefetch(req.query?.next_vid, quality, true);
     } catch (error) {
       this.plans.delete(`${vid}:${req.query?.quality || 'auto'}`);
+      logger.error('StreamService', `流媒体播放异常 vid=${vid}: ${error.message}`);
       if (!res.destroyed) {
         if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: '视频源加载失败，请稍后重试' })); }
         else res.destroy(error);

@@ -6,6 +6,7 @@ const sessionToken = randomBytes(32).toString('hex');
 const dramaService = require('./services/dramaService');
 const streamService = require('./services/streamService');
 const storeService = require('./services/storeService');
+const logger = require('./services/logger');
 
 const app = express();
 const PORT = process.env.PORT || 8899;
@@ -43,6 +44,25 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '64kb' }));
 
+// 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    const t0 = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - t0;
+      const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
+      if (res.statusCode >= 500) {
+        logger.error('API', msg);
+      } else if (res.statusCode >= 400) {
+        logger.warn('API', msg);
+      } else {
+        logger.info('API', msg);
+      }
+    });
+  }
+  next();
+});
+
 // 静态前端资源目录
 const clientDir = path.join(__dirname, '../client');
 app.use(express.static(clientDir));
@@ -57,7 +77,7 @@ function sendApiError(res, error) {
     EPERM: '无法保存本地数据，请稍后重试',
     EBUSY: '本地数据文件正被占用，请稍后重试'
   };
-  console.error('[API]', error.code || 'REQUEST_FAILED', error.message);
+  logger.error('API', `${error.code || 'REQUEST_FAILED'} - ${error.message}`);
   res.status(status).json({ error: status === 400 ? error.message : messages[error.code] || '操作失败，请稍后重试' });
 }
 
@@ -165,6 +185,32 @@ app.post('/api/favorites/toggle', async (req, res) => {
   }
 });
 
+/**
+ * 8. 前端播放器核心事件/报错上报日志接口
+ */
+app.post('/api/client-log', (req, res) => {
+  const { level = 'INFO', tag = 'ClientPlayer', message, extra } = req.body || {};
+  if (message && typeof message === 'string') {
+    const cleanMsg = message.slice(0, 500);
+    if (level === 'ERROR') logger.error(tag, cleanMsg, extra);
+    else if (level === 'WARN') logger.warn(tag, cleanMsg, extra);
+    else logger.info(tag, cleanMsg, extra);
+  }
+  res.json({ success: true });
+});
+
+/**
+ * 9. 系统诊断与日志排查接口
+ */
+app.get('/api/system/logs', (req, res) => {
+  const limit = Math.min(500, Math.max(10, Number(req.query?.limit) || 100));
+  res.json({
+    logFile: logger.getLogFilePath(),
+    logDir: logger.getLogDir(),
+    recent: logger.getRecentLogs(limit)
+  });
+});
+
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
 
 app.use((error, req, res, next) => {
@@ -182,11 +228,8 @@ function startServer(preferredPort = PORT) {
   return new Promise((resolve, reject) => {
     const server = app.listen(preferredPort, '127.0.0.1', () => {
       const actualPort = server.address().port;
-      console.log(`====================================================`);
-      console.log(`🚀 红果开放播放器服务已启动!`);
-      console.log(`📍 本地访问地址: http://127.0.0.1:${actualPort}`);
-      console.log(`🎬 具备 MP4 CENC 实时流式解密代理与全集无感预加载功能`);
-      console.log(`====================================================`);
+      logger.info('Server', `🚀 红果开放播放器服务已启动: http://127.0.0.1:${actualPort}`);
+      logger.info('Server', `📄 运行日志文件: ${logger.getLogFilePath()}`);
       resolve({ app, server, port: actualPort });
     });
 
