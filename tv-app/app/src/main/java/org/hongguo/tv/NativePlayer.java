@@ -170,6 +170,8 @@ final class NativePlayer {
         view = new PlayerView(context);
         view.setUseController(false);
         view.setShutterBackgroundColor(Color.TRANSPARENT);
+        // The page's video stage is black; letterbox bars come from this view, not the page.
+        view.setBackgroundColor(Color.BLACK);
         root.addView(view, 0, new FrameLayout.LayoutParams(1, 1));
         applyRect();
 
@@ -192,6 +194,8 @@ final class NativePlayer {
 
             @Override
             public void onIsPlayingChanged(boolean playing) {
+                // Without a WebView <video> nothing tells the system the user is watching, so the screensaver would start.
+                root.setKeepScreenOn(playing);
                 emit(playing ? "playing" : "paused", 0, 0, 0);
             }
 
@@ -211,6 +215,7 @@ final class NativePlayer {
     }
 
     private void stop() {
+        root.setKeepScreenOn(false);
         main.removeCallbacks(tick);
         if (player != null) {
             player.release();

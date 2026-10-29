@@ -29,7 +29,9 @@ public class MainActivity extends Activity {
     private static final String TV_JS =
         "(function(){if(window.__tv)return;window.__tv=1;"
         + "var s=document.createElement('style');"
-        + "s.textContent='.drama-card:focus,.actor-card:focus,button:focus{outline:3px solid #ffb300!important;outline-offset:2px}';"
+        // Buttons sit inside overflow containers (the nav bar), which clip an outer outline, so draw it inside and tint the fill.
+        + "s.textContent='.drama-card:focus,.actor-card:focus{outline:4px solid #ffb300!important;outline-offset:2px}"
+        + "button:focus{outline:3px solid #ffb300!important;outline-offset:-3px!important;background-color:rgba(255,179,0,0.28)!important}';"
         + "document.head.appendChild(s);"
         + "function mark(){document.querySelectorAll('.drama-card,.actor-card').forEach(function(e){e.tabIndex=0;});}"
         + "new MutationObserver(mark).observe(document.body,{childList:true,subtree:true});mark();"
@@ -81,12 +83,23 @@ public class MainActivity extends Activity {
 
         web.setWebViewClient(new WebViewClient() {
             // The TV's system WebView (Chrome 66 on Android 9) cannot parse the client's modern syntax,
-            // so serve the esbuild-transpiled copy that CI bundles into assets/.
+            // so serve the esbuild-transpiled copies that CI bundles into assets/.
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
-                if (!"/js/app.js".equals(req.getUrl().getPath())) return null;
+                String path = req.getUrl().getPath();
+                String asset;
+                String mime;
+                if ("/js/app.js".equals(path)) {
+                    asset = "app.js";
+                    mime = "application/javascript";
+                } else if ("/css/app.css".equals(path)) {
+                    asset = "app.css";
+                    mime = "text/css";
+                } else {
+                    return null;
+                }
                 try {
-                    return new WebResourceResponse("application/javascript", "utf-8", getAssets().open("app.js"));
+                    return new WebResourceResponse(mime, "utf-8", getAssets().open(asset));
                 } catch (IOException e) {
                     return null;
                 }

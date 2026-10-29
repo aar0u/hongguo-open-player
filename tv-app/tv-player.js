@@ -30,7 +30,7 @@
     + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
     + '#tv-menu button{display:block;width:100%;text-align:left;font-size:22px;padding:14px 20px;margin:6px 0;'
     + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
-    + '#tv-menu button:focus{outline:none;border-color:#ffb300;background:#2a3040}';
+    + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
   document.head.appendChild(css);
 
   // ---- Menu key panel: reaches controls the arrow keys cannot (they seek and switch episodes) ----
