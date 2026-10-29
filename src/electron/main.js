@@ -53,8 +53,10 @@ async function buildWindow() {
     windowOptions.titleBarStyle = 'hiddenInset'; // 优雅的 macOS 胶囊红绿灯一体化标题栏
     windowOptions.trafficLightPosition = { x: 16, y: 16 };
   } else {
-    // Windows 平台专属配置
-    windowOptions.icon = path.join(__dirname, '../../build/icon.ico');
+    // Windows uses ICO; Linux uses the shared PNG artwork.
+    windowOptions.icon = process.platform === 'win32'
+      ? path.join(__dirname, '../../build/icon.ico')
+      : path.join(__dirname, '../client/assets/app-icon.png');
     if (process.platform === 'win32') {
       windowOptions.titleBarStyle = 'hidden';
       windowOptions.titleBarOverlay = { color: '#14171f', symbolColor: '#ffffff', height: 40 };
@@ -184,6 +186,9 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    if (process.platform === 'darwin' && !app.isPackaged) {
+      app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'));
+    }
     setupMenu();
     createWindow().catch((err) => {
       console.error('Failed to create window:', err);

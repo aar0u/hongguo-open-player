@@ -89,8 +89,11 @@ html.platform-mac .app-header {
 }
 
 .brand-icon {
-  font-size: 20px;
-  line-height: 1;
+  width: 28px;
+  height: 28px;
+  display: block;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .brand-name {
