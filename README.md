@@ -1,4 +1,6 @@
-# 🎬 红果开放播放器 (Hongguo Open Player)
+<p><img src="build/icon.png" alt="红果开放播放器图标" width="96" height="96"></p>
+
+# 红果开放播放器 (Hongguo Open Player)
 
 [![CI](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/ci.yml)
 [![Release](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml/badge.svg)](https://github.com/zfdang/hongguo-open-player/actions/workflows/build-release.yml)
