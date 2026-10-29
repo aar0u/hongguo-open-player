@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 const express = require('express');
+const http = require('node:http');
 const path = require('path');
 const { randomBytes } = require('node:crypto');
 const sessionToken = randomBytes(32).toString('hex');
@@ -224,29 +225,38 @@ app.use((req, res) => {
 });
 
 // 启动服务函数封装
-function startServer(preferredPort = PORT) {
-  return new Promise((resolve, reject) => {
-    const server = app.listen(preferredPort, '127.0.0.1', () => {
-      const actualPort = server.address().port;
-      logger.info('Server', `🚀 红果开源播放器服务已启动: http://127.0.0.1:${actualPort}`);
-      logger.info('Server', `📄 运行日志文件: ${logger.getLogFilePath()}`);
-      resolve({ app, server, port: actualPort });
+async function startServer(preferredPort = PORT) {
+  function listen(port) {
+    return new Promise((resolve, reject) => {
+      const server = http.createServer(app);
+      const onError = error => {
+        server.removeListener('listening', onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        server.removeListener('error', onError);
+        resolve(server);
+      };
+      // Express 5 also invokes its listen callback on failure. Only the actual
+      // listening event guarantees that server.address() is available.
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(port, '127.0.0.1');
     });
+  }
 
-    server.on('error', (err) => {
-      if (err.code === 'EADDRINUSE') {
-        console.warn(`端口 ${preferredPort} 已被占用，尝试使用动态空闲端口...`);
-        const fallbackServer = app.listen(0, '127.0.0.1', () => {
-          const actualPort = fallbackServer.address().port;
-          console.log(`🚀 服务已启动在空闲端口: http://127.0.0.1:${actualPort}`);
-          resolve({ app, server: fallbackServer, port: actualPort });
-        });
-        fallbackServer.on('error', reject);
-      } else {
-        reject(err);
-      }
-    });
-  });
+  let server;
+  try {
+    server = await listen(preferredPort);
+  } catch (error) {
+    if (error.code !== 'EADDRINUSE') throw error;
+    logger.warn('Server', `端口 ${preferredPort} 已被占用，尝试使用动态空闲端口...`);
+    server = await listen(0);
+  }
+  const actualPort = server.address().port;
+  logger.info('Server', `🚀 红果开源播放器服务已启动: http://127.0.0.1:${actualPort}`);
+  logger.info('Server', `📄 运行日志文件: ${logger.getLogFilePath()}`);
+  return { app, server, port: actualPort };
 }
 
 // CLI 直接运行模式
