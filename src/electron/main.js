@@ -78,8 +78,16 @@ async function buildWindow() {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
   });
-  await window.loadURL(appUrl);
 
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await window.loadURL(appUrl);
+      break;
+    } catch (err) {
+      if (attempt === 5) throw err;
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
 }
 
 // 构建原生 macOS 菜单栏
@@ -200,6 +208,10 @@ if (!gotTheLock) {
     if (quitting || !serverInstance) return;
     quitting = true;
     event.preventDefault();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.destroy();
+      mainWindow = null;
+    }
     require('../server/services/streamService').shutdown();
     serverInstance.close();
     serverInstance.closeAllConnections?.();

@@ -14,7 +14,8 @@
     "build:win": "electron-builder --win --x64 --publish never",
     "build:all": "electron-builder --mac --arm64 --x64 --win --x64 --publish never",
     "test:unit": "node test/run-unit.js",
-    "test:e2e": "node test/verify-e2e.js"
+    "test:e2e": "node test/verify-e2e.js",
+    "test:arm64": "node test/verify-mac-arm64-ep5plus.js"
   },
   "build": {
     "appId": "com.zfdang.hongguo.openplayer",
