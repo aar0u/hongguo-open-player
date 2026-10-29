@@ -1,6 +1,7 @@
 // Registered, signed App search; the caller chooses website/new-release fallback.
 const { signedSearchRequest, parseSearchInteger, requestJson } = require('./app-source');
 const { getPlaybackDevice } = require('./playback-device');
+const { matchesSearchKeyword } = require('./search-relevance');
 
 const SEARCH_TAB = 11;
 const DEFAULT_TIMEOUT_MS = 8000;
@@ -35,7 +36,7 @@ async function defaultRequest(signed, deadline) {
   }
 }
 
-function parseSearchPayload(payload, { page = 1 } = {}) {
+function parseSearchPayload(payload, { page = 1, keyword = '' } = {}) {
   page = parseSearchInteger(page);
   if (page === null || page < 1 || page > 50) throw appError('App 搜索页码需为 1 至 50 的整数', 'APP_INPUT');
   if (!payload || typeof payload !== 'object') throw appError('App 搜索返回空响应', 'APP_EMPTY');
@@ -54,6 +55,9 @@ function parseSearchPayload(payload, { page = 1 } = {}) {
     const title = cleanTitle(cell?.search_high_light?.title?.text || video.title || cell?.cell_name || '');
     if (!title || seen.has(seriesId)) continue;
     seen.add(seriesId);
+    if (!matchesSearchKeyword(keyword, title, video?.series_intro, video?.video_desc,
+      cell?.series_intro, video?.tags, video?.category_list, video?.celebrities,
+      cell?.search_high_light)) continue;
     results.push({
       series_id: seriesId,
       series_title: title,
@@ -64,7 +68,7 @@ function parseSearchPayload(payload, { page = 1 } = {}) {
       url: `https://hongguoduanju.com/detail?series_id=${seriesId}`,
     });
   }
-  const hasMore = tab.has_more === true && page < 50;
+  const hasMore = results.length > 0 && tab.has_more === true && page < 50;
   return {
     success: true,
     results,
@@ -96,7 +100,7 @@ async function searchApp(keyword, { page = 1, cursor = null, deadline = 0, reque
   if (budget <= Date.now()) throw appError('App 搜索超时', 'APP_TIMEOUT');
   const signed = signedSearchRequest({ keyword: kw, page: pg, cursor, identity });
   const payload = await request(signed, budget);
-  return parseSearchPayload(payload, { page: pg });
+  return parseSearchPayload(payload, { page: pg, keyword: kw });
 }
 
 module.exports = { searchApp, parseSearchPayload, cleanTitle, appCover, DEFAULT_TIMEOUT_MS };
