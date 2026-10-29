@@ -31,7 +31,13 @@ createApp({
     const activeActor = ref(null);
     const activeActorDetail = ref(null);
     const actorWorks = ref([]);
+    const actorWorksOffset = ref(0);
+    const actorWorksTotal = ref(0);
+    const actorWorksHasMore = ref(false);
     const loadingActorWorks = ref(false);
+    const loadingMoreWorks = ref(false);
+    const actorWorksError = ref('');
+    let currentActorRequestId = 0;
 
     // 剧场模式与播放器
     const videoEl = ref(null);
@@ -230,18 +236,22 @@ createApp({
       loadingActors.value = true;
       try {
         const response = await fetch(`/api/actors/ranking?page=${actorPage.value}`);
-        if (!response.ok) throw new Error(`加载剧星榜失败 (${response.status})`);
         const data = await response.json();
-        if (data.success && Array.isArray(data.actors)) {
-          actors.value = data.actors;
-          actorRankDate.value = data.rank_date || '';
-          actorHasMore.value = !!data.has_more;
-        } else {
-          throw new Error(data.error || '获取剧星榜失败');
+        if (!response.ok || !data.success || !Array.isArray(data.actors)) {
+          throw new Error(data.error || `加载剧星榜失败 (${response.status})`);
         }
+        actors.value = data.actors;
+        actorRankDate.value = data.rank_date || '';
+        actorHasMore.value = !!data.has_more;
       } catch (err) {
         console.error('加载剧星榜失败:', err);
         notify(err.message || '剧星榜加载失败，请重试');
+        if (actorPage.value > 1) {
+          // 若跨页或会话失效失败，安全返回第 1 页并刷新
+          actorPage.value = 1;
+          await loadActorRankings();
+          return;
+        }
         actors.value = [];
         actorHasMore.value = false;
       } finally {
@@ -257,35 +267,148 @@ createApp({
 
     async function openActorDetail(actor) {
       if (!actor || !actor.actor_id) return;
+      const requestId = ++currentActorRequestId;
+      const targetActorId = String(actor.actor_id);
+
       activeActor.value = actor;
       activeActorDetail.value = null;
       actorWorks.value = [];
+      actorWorksOffset.value = 0;
+      actorWorksTotal.value = 0;
+      actorWorksHasMore.value = false;
       loadingActorWorks.value = true;
-      reportClientLog('INFO', `打开演员主页: ${actor.name} (actorId=${actor.actor_id})`);
+      loadingMoreWorks.value = false;
+      actorWorksError.value = '';
+      reportClientLog('INFO', `打开演员主页: ${actor.name} (actorId=${targetActorId})`);
 
       try {
         const [detailRes, worksRes] = await Promise.allSettled([
-          fetch(`/api/actors/${encodeURIComponent(actor.actor_id)}`).then(r => r.json()),
-          fetch(`/api/actors/${encodeURIComponent(actor.actor_id)}/works?count=30`).then(r => r.json())
+          fetch(`/api/actors/${encodeURIComponent(targetActorId)}`).then(async r => {
+            const json = await r.json();
+            if (!r.ok || !json.success) throw new Error(json.error || `获取演员详情失败 (${r.status})`);
+            return json;
+          }),
+          fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`).then(async r => {
+            const json = await r.json();
+            if (!r.ok || !json.success) throw new Error(json.error || `获取演员作品失败 (${r.status})`);
+            return json;
+          })
         ]);
+
+        // 校验请求是否仍有效且仍属于当前打开的演员
+        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
+          return;
+        }
 
         if (detailRes.status === 'fulfilled' && detailRes.value?.success) {
           activeActorDetail.value = detailRes.value.actor;
         }
+
         if (worksRes.status === 'fulfilled' && worksRes.value?.success) {
-          actorWorks.value = worksRes.value.works || [];
+          const worksData = worksRes.value;
+          actorWorks.value = worksData.works || [];
+          actorWorksTotal.value = Number(worksData.total_count) || actorWorks.value.length;
+          actorWorksOffset.value = actorWorks.value.length;
+          actorWorksHasMore.value = !!worksData.has_more && actorWorks.value.length < actorWorksTotal.value;
+          actorWorksError.value = '';
+        } else {
+          const errReason = worksRes.status === 'rejected' ? worksRes.reason?.message : (worksRes.value?.error || '作品列表加载失败');
+          actorWorksError.value = errReason || '获取演员作品失败';
+          actorWorks.value = [];
+          actorWorksHasMore.value = false;
         }
       } catch (err) {
-        console.error('获取演员详情失败:', err);
+        if (requestId === currentActorRequestId) {
+          console.error('获取演员详情失败:', err);
+          actorWorksError.value = err.message || '获取演员数据失败';
+        }
       } finally {
-        loadingActorWorks.value = false;
+        if (requestId === currentActorRequestId) {
+          loadingActorWorks.value = false;
+        }
+      }
+    }
+
+    async function loadMoreActorWorks() {
+      if (!activeActor.value || loadingMoreWorks.value || !actorWorksHasMore.value) return;
+      const requestId = currentActorRequestId;
+      const targetActorId = String(activeActor.value.actor_id);
+      const currentOffset = actorWorks.value.length;
+      loadingMoreWorks.value = true;
+      actorWorksError.value = '';
+
+      try {
+        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=${currentOffset}`);
+        const data = await response.json();
+        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
+          return;
+        }
+        if (response.ok && data.success && Array.isArray(data.works)) {
+          const existingIds = new Set(actorWorks.value.map(w => w.series_id));
+          const newWorks = data.works.filter(w => !existingIds.has(w.series_id));
+          actorWorks.value = [...actorWorks.value, ...newWorks];
+          actorWorksTotal.value = Number(data.total_count) || actorWorks.value.length;
+          actorWorksOffset.value = actorWorks.value.length;
+          actorWorksHasMore.value = !!data.has_more && actorWorks.value.length < actorWorksTotal.value;
+        } else {
+          throw new Error(data.error || '加载更多作品失败');
+        }
+      } catch (err) {
+        if (requestId === currentActorRequestId) {
+          console.error('加载更多作品失败:', err);
+          notify(err.message || '加载更多作品失败，请重试');
+        }
+      } finally {
+        if (requestId === currentActorRequestId) {
+          loadingMoreWorks.value = false;
+        }
+      }
+    }
+
+    async function retryLoadActorWorks() {
+      if (!activeActor.value) return;
+      const requestId = ++currentActorRequestId;
+      const targetActorId = String(activeActor.value.actor_id);
+      loadingActorWorks.value = true;
+      actorWorksError.value = '';
+
+      try {
+        const response = await fetch(`/api/actors/${encodeURIComponent(targetActorId)}/works?count=20&offset=0`);
+        const data = await response.json();
+        if (requestId !== currentActorRequestId || !activeActor.value || String(activeActor.value.actor_id) !== targetActorId) {
+          return;
+        }
+        if (response.ok && data.success && Array.isArray(data.works)) {
+          actorWorks.value = data.works;
+          actorWorksTotal.value = Number(data.total_count) || actorWorks.value.length;
+          actorWorksOffset.value = actorWorks.value.length;
+          actorWorksHasMore.value = !!data.has_more && actorWorks.value.length < actorWorksTotal.value;
+          actorWorksError.value = '';
+        } else {
+          throw new Error(data.error || '获取演员作品失败');
+        }
+      } catch (err) {
+        if (requestId === currentActorRequestId) {
+          actorWorksError.value = err.message || '获取演员作品失败，请重试';
+        }
+      } finally {
+        if (requestId === currentActorRequestId) {
+          loadingActorWorks.value = false;
+        }
       }
     }
 
     function closeActorDetail() {
+      currentActorRequestId++;
       activeActor.value = null;
       activeActorDetail.value = null;
       actorWorks.value = [];
+      actorWorksOffset.value = 0;
+      actorWorksTotal.value = 0;
+      actorWorksHasMore.value = false;
+      actorWorksError.value = '';
+      loadingActorWorks.value = false;
+      loadingMoreWorks.value = false;
     }
 
     function switchToRelatedActor(rel) {
@@ -889,11 +1012,18 @@ createApp({
       activeActor,
       activeActorDetail,
       actorWorks,
+      actorWorksOffset,
+      actorWorksTotal,
+      actorWorksHasMore,
       loadingActorWorks,
+      loadingMoreWorks,
+      actorWorksError,
       loadActorRankings,
       changeActorPage,
       openActorDetail,
       closeActorDetail,
+      loadMoreActorWorks,
+      retryLoadActorWorks,
       switchToRelatedActor,
       playActorWork,
       getRankChangeClass,

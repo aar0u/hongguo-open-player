@@ -9,6 +9,7 @@ const {
   parseDetailPayload,
   parseWorksPayload,
   clearActorSession,
+  clearWorksCache,
   fetchActorRankings,
   fetchActorDetail,
   fetchActorWorks
@@ -198,6 +199,54 @@ test('fetchActorRankings handles pagination and in-memory session caching', asyn
   assert.equal(resPage2.success, true);
   assert.equal(resPage2.actors[0].name, '演员B');
   assert.equal(requestCount, 2);
+
+  // 4. Clear session (simulating TTL expiration) and jump directly to page 3
+  // hongguo-actor should sequentially rebuild cursors from page 1 to 2, then fetch page 3
+  clearActorSession();
+  const requestedPages = [];
+  const pagedMockRequest = async (signed) => {
+    const isP1 = signed.url.includes('tab_type=26');
+    const urlObj = new URL(signed.url);
+    const offset = urlObj.searchParams.get('offset') || '0';
+    requestedPages.push({ isP1, offset });
+    return {
+      code: 0,
+      data: {
+        has_more: true,
+        next_offset: Number(offset) + 10,
+        session_id: 'rebuilt-sess',
+        cell_view: {
+          cell_data: [
+            {
+              ugc_user_data: [
+                {
+                  user_info: {
+                    base_info: {
+                      actor_id_str: `760211934819020524${offset}`,
+                      user_name: `演员_off${offset}`
+                    }
+                  },
+                  rec_text_item: { RecommendText: '100万人气' }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    };
+  };
+
+  const resPage3 = await fetchActorRankings({ page: 3, limit: 10, request: pagedMockRequest });
+  assert.equal(resPage3.success, true);
+  assert.equal(resPage3.page, 3);
+  // Requested page 1 (tab_type=26, offset=0), then page 2 (offset=10), then page 3 (offset=20)
+  assert.equal(requestedPages.length, 3);
+  assert.equal(requestedPages[0].offset, '0');
+  assert.equal(requestedPages[1].offset, '10');
+  assert.equal(requestedPages[2].offset, '20');
+  // Rank of actor on page 3 must be correctly computed as (3 - 1) * 10 + 1 = 21
+  assert.equal(resPage3.actors[0].rank, 21);
+  assert.equal(resPage3.actors[0].name, '演员_off20');
 });
 
 test('fetchActorDetail and fetchActorWorks parse profiles, related actors and drama works', async () => {
@@ -223,34 +272,58 @@ test('fetchActorDetail and fetchActorWorks parse profiles, related actors and dr
   assert.equal(detailRes.actor.related_celebrities.length, 1);
   assert.equal(detailRes.actor.related_celebrities[0].name, '马秋元');
 
-  // 2. Works parsing
-  const mockWorksRequest = async () => ({
-    code: 0,
-    data: {
-      works: {
-        '7602119348190205246': {
-          total_count: 50,
-          has_more: true,
-          video_list: [
-            {
-              series_id: '7700249043456248857',
-              title: '何总的贴身秘书',
-              cover: 'https://p3-reading-sign.fqnovelpic.com/novel-pic/cover.jpeg',
-              sub_title: '都市脑洞·80集',
-              score: '9.6'
-            }
-          ]
+  // 2. Works parsing & multi-page slicing with cache
+  clearWorksCache();
+  let upstreamWorksCalls = 0;
+  const mockWorksRequest = async () => {
+    upstreamWorksCalls++;
+    return {
+      code: 0,
+      data: {
+        works: {
+          '7602119348190205246': {
+            total_count: 5,
+            has_more: true,
+            video_list: [
+              { series_id: '101', title: '短剧1', cover: 'https://img/1.jpeg', sub_title: '10集' },
+              { series_id: '102', title: '短剧2', cover: 'https://img/2.jpeg', sub_title: '20集' },
+              { series_id: '103', title: '短剧3', cover: 'https://img/3.jpeg', sub_title: '30集' },
+              { series_id: '104', title: '短剧4', cover: 'https://img/4.jpeg', sub_title: '40集' },
+              { series_id: '105', title: '短剧5', cover: 'https://img/5.jpeg', sub_title: '50集' }
+            ]
+          }
         }
       }
-    }
-  });
+    };
+  };
 
-  const worksRes = await fetchActorWorks('7602119348190205246', { count: 10, offset: 0, request: mockWorksRequest });
-  assert.equal(worksRes.success, true);
-  assert.equal(worksRes.works.length, 1);
-  assert.equal(worksRes.works[0].series_id, '7700249043456248857');
-  assert.equal(worksRes.works[0].series_title, '何总的贴身秘书');
-  assert.equal(worksRes.works[0].episode_count, 80);
+  // Batch 1: offset=0, count=2 -> items 101, 102
+  const worksRes1 = await fetchActorWorks('7602119348190205246', { count: 2, offset: 0, request: mockWorksRequest });
+  assert.equal(worksRes1.success, true);
+  assert.equal(worksRes1.works.length, 2);
+  assert.equal(worksRes1.works[0].series_id, '101');
+  assert.equal(worksRes1.works[1].series_id, '102');
+  assert.equal(worksRes1.total_count, 5);
+  assert.equal(worksRes1.has_more, true);
+  assert.equal(upstreamWorksCalls, 1);
+
+  // Batch 2: offset=2, count=2 -> items 103, 104 (served from cache)
+  const worksRes2 = await fetchActorWorks('7602119348190205246', { count: 2, offset: 2, request: mockWorksRequest });
+  assert.equal(worksRes2.success, true);
+  assert.equal(worksRes2.works.length, 2);
+  assert.equal(worksRes2.works[0].series_id, '103');
+  assert.equal(worksRes2.works[1].series_id, '104');
+  assert.equal(worksRes2.from_cache, true);
+  assert.equal(worksRes2.has_more, true);
+  assert.equal(upstreamWorksCalls, 1); // No new upstream call
+
+  // Batch 3: offset=4, count=2 -> item 105 (served from cache, has_more=false)
+  const worksRes3 = await fetchActorWorks('7602119348190205246', { count: 2, offset: 4, request: mockWorksRequest });
+  assert.equal(worksRes3.success, true);
+  assert.equal(worksRes3.works.length, 1);
+  assert.equal(worksRes3.works[0].series_id, '105');
+  assert.equal(worksRes3.has_more, false);
+  assert.equal(upstreamWorksCalls, 1);
 
   // 3. Input validation
   await assert.rejects(fetchActorDetail('abc!'), /无效的演员 ID/);

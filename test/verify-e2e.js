@@ -200,7 +200,36 @@ async function runTests() {
     }
     assert.strictEqual(detailRes.status, 200);
     assert.strictEqual(detailRes.data.actor.actor_id, firstActor.actor_id);
-    console.log(`  ✅ 成功获取演员主页: ${detailRes.data.actor.name}\n`);
+    console.log(`  ✅ 成功获取演员主页: ${detailRes.data.actor.name}`);
+
+    // 8.1 验证演员作品列表与分页推进
+    console.log(`  ▶ 验证演员作品分页拉取 (GET /api/actors/${firstActor.actor_id}/works)...`);
+    let worksResBatch1;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        worksResBatch1 = await client.get(`${BASE_URL}/api/actors/${firstActor.actor_id}/works?count=5&offset=0`, { timeout: 15000 });
+        if (worksResBatch1.status === 200 && worksResBatch1.data?.success) break;
+      } catch (err) {
+        if (attempt === 3) throw err;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    assert.strictEqual(worksResBatch1.status, 200);
+    assert.strictEqual(worksResBatch1.data.success, true);
+    assert(Array.isArray(worksResBatch1.data.works), '作品必须返回数组');
+    console.log(`  ✅ 成功拉取首批作品: 共 ${worksResBatch1.data.works.length} 部 (总计: ${worksResBatch1.data.total_count} 部)`);
+
+    if (worksResBatch1.data.total_count > 5) {
+      const worksResBatch2 = await client.get(`${BASE_URL}/api/actors/${firstActor.actor_id}/works?count=5&offset=5`, { timeout: 15000 });
+      assert.strictEqual(worksResBatch2.status, 200);
+      assert.strictEqual(worksResBatch2.data.offset, 5);
+      if (worksResBatch2.data.works.length > 0) {
+        assert.notStrictEqual(worksResBatch1.data.works[0].series_id, worksResBatch2.data.works[0].series_id, '第 2 批作品必须与第 1 批首作不重复');
+      }
+      console.log(`  ✅ 成功推进第 2 批作品分页 (offset=5): 返回 ${worksResBatch2.data.works.length} 部\n`);
+    } else {
+      console.log(`  ℹ️ 演员作品总数 <= 5 部，单批全部返回\n`);
+    }
 
     console.log('======================================================');
     console.log('🎉 所有 8 项全流程测试全部成功通过！');

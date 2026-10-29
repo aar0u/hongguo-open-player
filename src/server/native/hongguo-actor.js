@@ -6,10 +6,12 @@ const logger = require('../services/logger');
 const RANK_CELL_ID = '7470092475068071998';
 const RANK_SELECTED = 'ranklist_celebrity';
 const RANK_SUB_SELECTED = 'ranklist_series_actor';
-const CACHE_TTL_MS = 180000; // 3分钟会话缓存
+const CACHE_TTL_MS = 900000; // 15分钟会话缓存
+const WORKS_CACHE_TTL_MS = 300000; // 5分钟作品缓存
 const TIMEOUT_MS = 15000;
 
 let activeSession = null;
+const worksCache = new Map();
 
 function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
   return Object.assign(new Error(message), { code, status });
@@ -17,6 +19,10 @@ function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
 
 function clearActorSession() {
   activeSession = null;
+}
+
+function clearWorksCache() {
+  worksCache.clear();
 }
 
 function catalogCover(value) {
@@ -152,6 +158,31 @@ function parseDetailPayload(payload, cleanId) {
   };
 }
 
+function mapVideoToWork(v) {
+  const seriesId = String(v.series_id || '');
+  const title = cleanTitle(v.title || '');
+  const cover = catalogCover(v.cover);
+  const episodeCount = Number(v.episode_cnt) || extractEpisodeCount(v.sub_title);
+  const subTitle = cleanTitle(v.sub_title || '');
+  const recText = v.rec_text || '';
+  const score = v.score || '';
+  const desc = cleanTitle(v.video_desc || '');
+  const duration = Number(v.duration) || 0;
+
+  return {
+    series_id: seriesId,
+    series_title: title,
+    cover,
+    episode_count: episodeCount,
+    sub_title: subTitle,
+    rec_text: recText,
+    score,
+    description: desc,
+    duration,
+    source: 'hongguo'
+  };
+}
+
 function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = {}) {
   if (!payload || payload.code !== 0) {
     throw actorError(payload?.message || '获取演员作品失败', 'ACTOR_UPSTREAM_ERROR', 502);
@@ -160,38 +191,20 @@ function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = 
   const worksMap = payload.data?.works || {};
   const actorWorkData = worksMap[cleanId] || {};
   const rawVideos = Array.isArray(actorWorkData.video_list) ? actorWorkData.video_list : [];
+  const totalCount = Number(actorWorkData.total_count) || rawVideos.length;
 
-  const works = rawVideos.map(v => {
-    const seriesId = String(v.series_id || '');
-    const title = cleanTitle(v.title || '');
-    const cover = catalogCover(v.cover);
-    const episodeCount = Number(v.episode_cnt) || extractEpisodeCount(v.sub_title);
-    const subTitle = cleanTitle(v.sub_title || '');
-    const recText = v.rec_text || '';
-    const score = v.score || '';
-    const desc = cleanTitle(v.video_desc || '');
-    const duration = Number(v.duration) || 0;
+  // 上游 GET 接口未推进 offset 时，由服务层根据 reqOffset 切片推进分页
+  const pagedVideos = rawVideos.slice(reqOffset, reqOffset + reqCount);
 
-    return {
-      series_id: seriesId,
-      series_title: title,
-      cover,
-      episode_count: episodeCount,
-      sub_title: subTitle,
-      rec_text: recText,
-      score,
-      description: desc,
-      duration,
-      source: 'hongguo'
-    };
-  }).filter(w => w.series_id && w.series_title);
+  const works = pagedVideos.map(mapVideoToWork).filter(w => w.series_id && w.series_title);
+  const hasMore = (reqOffset + works.length < totalCount);
 
   return {
     success: true,
     actor_id: cleanId,
     works,
-    total_count: Number(actorWorkData.total_count) || works.length,
-    has_more: !!actorWorkData.has_more,
+    total_count: totalCount,
+    has_more: hasMore,
     offset: reqOffset,
     count: reqCount
   };
@@ -199,6 +212,7 @@ function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = 
 
 /**
  * 获取剧星榜（演员排行榜）
+ * 严格按照分页会话链条递增推进，过期自动从第 1 页顺序重构游标，杜绝乱序与跳页标号错误。
  * @param {Object} [options]
  * @param {number} [options.page=1] - 页码 (1..20)
  * @param {number} [options.limit=20] - 每页条数
@@ -208,9 +222,9 @@ function parseWorksPayload(payload, cleanId, { reqOffset = 0, reqCount = 20 } = 
 async function fetchActorRankings({ page = 1, limit = 20, request = defaultRequest } = {}) {
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const pageLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 20));
-
-  // 检查是否可以使用现有会话缓存
   const now = Date.now();
+
+  // 1. 命中内存缓存直接返回
   if (activeSession && activeSession.expiresAt > now && activeSession.pages.has(pageNum)) {
     const cached = activeSession.pages.get(pageNum);
     logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}`);
@@ -226,12 +240,21 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
     };
   }
 
-  // 若需要请求第 2 页及以上，但无有效会话，需先拉取第 1 页建立会话
-  if (pageNum > 1 && (!activeSession || activeSession.expiresAt <= now)) {
-    logger.info('HongguoActor', `剧星榜会话未就绪，先拉取第 1 页建立分页会话`);
-    await fetchActorRankings({ page: 1, limit: pageLimit, request });
+  // 2. 若请求第 2 页及以上，但会话已失效或游标未链式推进至 pageNum，顺序重构从第 1 页至 pageNum-1
+  if (pageNum > 1 && (!activeSession || activeSession.expiresAt <= now || !activeSession.pageOffsets?.has(pageNum))) {
+    if (!activeSession || activeSession.expiresAt <= now) {
+      clearActorSession();
+    }
+    logger.info('HongguoActor', `剧星榜会话未就绪或未推进至第 ${pageNum} 页，从第 1 页顺序建立分页游标`);
+    for (let p = 1; p < pageNum; p++) {
+      const stepRes = await fetchActorRankings({ page: p, limit: pageLimit, request });
+      if (!stepRes.has_more) {
+        throw actorError('已到达榜单末尾，无更多演员数据', 'ACTOR_PAGE_OVERFLOW', 400);
+      }
+    }
   }
 
+  // 3. 构建当前页请求参数
   let values;
   if (pageNum === 1 || !activeSession) {
     values = {
@@ -253,6 +276,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       unlimited_selector_change_type: '0'
     };
   } else {
+    const currentOffset = activeSession.pageOffsets?.get(pageNum);
     values = {
       tab_type: '18',
       client_req_type: '2',
@@ -264,7 +288,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       category_id: '0',
       gender: '2',
       limit: String(pageLimit),
-      offset: String(activeSession.nextOffset || (pageNum - 1) * pageLimit),
+      offset: String(currentOffset !== undefined ? currentOffset : (pageNum - 1) * pageLimit),
       session_id: activeSession.sessionId || '',
       background_selected_items: '',
       panel_selected_items: '',
@@ -279,18 +303,22 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
   const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession });
   const { actors, rankDate, hasMore, nextOffset, sessionId } = parsed;
 
-  // 更新会话存储
+  // 4. 更新会话与游标映射
   if (!activeSession || pageNum === 1) {
     activeSession = {
       sessionId,
       nextOffset,
       rankDate,
       expiresAt: Date.now() + CACHE_TTL_MS,
-      pages: new Map()
+      pages: new Map(),
+      pageOffsets: new Map([[1, 0]])
     };
   } else {
     activeSession.nextOffset = nextOffset;
     if (sessionId) activeSession.sessionId = sessionId;
+  }
+  if (nextOffset !== undefined) {
+    activeSession.pageOffsets.set(pageNum + 1, nextOffset);
   }
   activeSession.pages.set(pageNum, { actors, rankDate, hasMore });
 
@@ -328,7 +356,7 @@ async function fetchActorDetail(actorId, { request = defaultRequest } = {}) {
 }
 
 /**
- * 获取演员参演短剧作品列表
+ * 获取演员参演短剧作品列表 (带分页游标推进与内存切片支持)
  * @param {string} actorId - 演员 ID 字符串
  * @param {Object} [options]
  * @param {number} [options.count=20] - 单次拉取数量
@@ -345,14 +373,58 @@ async function fetchActorWorks(actorId, { count = 20, offset = 0, request = defa
   const reqCount = Math.max(1, Math.min(50, parseInt(count, 10) || 20));
   const reqOffset = Math.max(0, parseInt(offset, 10) || 0);
 
+  // 检查演员作品内存缓存
+  const cached = worksCache.get(cleanId);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now && (
+    cached.rawVideos.length >= reqOffset + reqCount ||
+    !cached.hasMore ||
+    cached.rawVideos.length >= cached.totalCount
+  )) {
+    const rawVideos = cached.rawVideos;
+    const totalCount = cached.totalCount;
+    const pagedVideos = rawVideos.slice(reqOffset, reqOffset + reqCount);
+    const works = pagedVideos.map(mapVideoToWork).filter(w => w.series_id && w.series_title);
+    return {
+      success: true,
+      actor_id: cleanId,
+      works,
+      total_count: totalCount,
+      has_more: (reqOffset + works.length < totalCount),
+      offset: reqOffset,
+      count: reqCount,
+      from_cache: true
+    };
+  }
+
+  // 上游请求所需抓取的最大条数 (最小抓 40 条以减少翻页请求频次)
+  const targetCount = Math.min(300, Math.max(reqOffset + reqCount, 40));
   const signed = signedMetadataRequest('/reading/user/celebrity/works/v1/', {
     encrypted_celebrity_ids: cleanId,
     offset: String(reqOffset),
-    count: String(reqCount),
+    count: String(targetCount),
     req_scene: '0'
   });
 
   const payload = await request(signed, Date.now() + TIMEOUT_MS);
+  if (!payload || payload.code !== 0) {
+    throw actorError(payload?.message || '获取演员作品失败', 'ACTOR_UPSTREAM_ERROR', 502);
+  }
+
+  const worksMap = payload.data?.works || {};
+  const actorWorkData = worksMap[cleanId] || {};
+  const rawVideos = Array.isArray(actorWorkData.video_list) ? actorWorkData.video_list : [];
+  const totalCount = Number(actorWorkData.total_count) || rawVideos.length;
+  const hasMore = !!actorWorkData.has_more && rawVideos.length < totalCount;
+
+  // 写入作品内存缓存
+  worksCache.set(cleanId, {
+    rawVideos,
+    totalCount,
+    hasMore,
+    expiresAt: now + WORKS_CACHE_TTL_MS
+  });
+
   return parseWorksPayload(payload, cleanId, { reqOffset, reqCount });
 }
 
@@ -364,6 +436,7 @@ module.exports = {
   parseDetailPayload,
   parseWorksPayload,
   clearActorSession,
+  clearWorksCache,
   catalogCover,
   extractEpisodeCount
 };

@@ -395,45 +395,69 @@
 
         <div class="actor-modal-body">
           <div class="works-section-header">
-            <h3 class="works-title">🎬 参演短剧作品 ({{ actorWorks.length }})</h3>
+            <h3 class="works-title">🎬 参演短剧作品 ({{ actorWorksTotal || actorWorks.length }})</h3>
             <span class="works-hint">点击任意短剧立即开播</span>
           </div>
 
-          <!-- 作品加载骨架屏 -->
+          <!-- 1. 作品加载骨架屏 -->
           <div v-if="loadingActorWorks" class="drama-grid" aria-label="正在加载作品列表" aria-busy="true">
             <div v-for="n in 4" :key="n" class="skeleton-card" aria-hidden="true">
               <div class="skeleton-cover"></div><div class="skeleton-line"></div>
             </div>
           </div>
 
-          <!-- 作品为空状态 -->
+          <!-- 2. 作品加载失败状态 -->
+          <div v-else-if="actorWorksError" class="actor-works-error-box" role="alert">
+            <div class="error-icon">⚠️</div>
+            <p class="error-msg">{{ actorWorksError }}</p>
+            <button class="retry-btn" @click="retryLoadActorWorks">重试加载作品</button>
+          </div>
+
+          <!-- 3. 作品为空状态 -->
           <div v-else-if="actorWorks.length === 0" class="empty-works">
             <p>暂未查询到该演员的独立短剧作品，换位演员看看吧</p>
           </div>
 
-          <!-- 作品卡片网格 -->
-          <div v-else class="drama-grid actor-works-grid">
-            <div
-              v-for="work in actorWorks"
-              :key="work.series_id"
-              class="drama-card"
-              @click="playActorWork(work)"
-            >
-              <div class="card-cover-wrapper">
-                <img :src="work.cover" :alt="work.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
-                <div class="cover-overlay">
-                  <span class="play-badge">▶ 立即播放</span>
+          <!-- 4. 作品卡片网格与分页 -->
+          <div v-else class="actor-works-content">
+            <div class="drama-grid actor-works-grid">
+              <div
+                v-for="work in actorWorks"
+                :key="work.series_id"
+                class="drama-card"
+                @click="playActorWork(work)"
+              >
+                <div class="card-cover-wrapper">
+                  <img :src="work.cover" :alt="work.series_title" loading="lazy" class="card-cover" @error="onImageError"/>
+                  <div class="cover-overlay">
+                    <span class="play-badge">▶ 立即播放</span>
+                  </div>
+                  <span v-if="work.episode_count" class="episode-badge">全 {{ work.episode_count }} 集</span>
+                  <span v-if="work.rec_text" class="rec-badge">{{ work.rec_text }}</span>
                 </div>
-                <span v-if="work.episode_count" class="episode-badge">全 {{ work.episode_count }} 集</span>
-                <span v-if="work.rec_text" class="rec-badge">{{ work.rec_text }}</span>
-              </div>
-              <div class="card-info">
-                <h4 class="drama-title" :title="work.series_title">{{ work.series_title }}</h4>
-                <div v-if="work.sub_title" class="card-tags">
-                  <span class="card-tag">{{ work.sub_title }}</span>
+                <div class="card-info">
+                  <h4 class="drama-title" :title="work.series_title">{{ work.series_title }}</h4>
+                  <div v-if="work.sub_title" class="card-tags">
+                    <span class="card-tag">{{ work.sub_title }}</span>
+                  </div>
+                  <p v-if="work.description" class="drama-desc">{{ work.description }}</p>
                 </div>
-                <p v-if="work.description" class="drama-desc">{{ work.description }}</p>
               </div>
+            </div>
+
+            <!-- 分页加载更多作品 -->
+            <div v-if="actorWorksHasMore" class="actor-works-load-more">
+              <button
+                class="load-more-btn"
+                :disabled="loadingMoreWorks"
+                @click="loadMoreActorWorks"
+              >
+                <span v-if="loadingMoreWorks" class="spinner-small"></span>
+                <span>{{ loadingMoreWorks ? '正在加载更多作品...' : '加载更多参演短剧 (' + actorWorks.length + '/' + actorWorksTotal + ')' }}</span>
+              </button>
+            </div>
+            <div v-else-if="actorWorks.length > 0 && actorWorksTotal > 0" class="actor-works-all-loaded">
+              <span>已加载全部 {{ actorWorks.length }} 部短剧作品</span>
             </div>
           </div>
         </div>
