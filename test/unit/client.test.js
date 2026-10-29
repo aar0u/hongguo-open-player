@@ -38,6 +38,29 @@ test('late catalog responses cannot replace the active tab; search pagination ke
 
 module.exports = { client, response };
 
+test('search from saved lists enters search mode and keeps paging independent of draft input', async () => {
+  for (const tab of ['history', 'favorites']) {
+    const requests = [];
+    const state = client(async url => {
+      requests.push(url);
+      return response(url.startsWith('/api/search')
+        ? { results: [{ series_id: '123' }], hasMore: true }
+        : []);
+    });
+    state.switchTab(tab);
+    state.searchKeyword.value = '离婚';
+    await state.handleSearch();
+    assert.equal(state.currentTab.value, 'search');
+    assert.equal(state.hasMore.value, true);
+    state.searchKeyword.value = '';
+    state.changePage(1);
+    assert.equal(requests.at(-1), '/api/search?keyword=%E7%A6%BB%E5%A9%9A&page=2');
+    state.switchTab(tab);
+    assert.equal(state.currentPage.value, 1);
+    assert.equal(requests.at(-1), `/api/${tab}`);
+  }
+});
+
 test('switching series and episodes resets progress and canplay preserves a user pause', async () => {
   const saved = [];
   const series = id => ({ series_id: id, episodes: [{ vid: `${id}1`, vid_index: 1 }, { vid: `${id}2`, vid_index: 2 }] });

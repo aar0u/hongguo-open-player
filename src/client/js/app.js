@@ -10,7 +10,7 @@ createApp({
   setup() {
     // 视图模式与导航状态
     const viewMode = ref('catalog'); // 'catalog' | 'theater'
-    const currentTab = ref('hot-drama'); // 'hot-drama' | 'real-drama' | 'comic-drama' | 'ai-drama' | 'history' | 'favorites'
+    const currentTab = ref('hot-drama'); // 'hot-drama' | 'real-drama' | 'comic-drama' | 'ai-drama' | 'history' | 'favorites' | 'search'
     const searchKeyword = ref('');
     const hotTags = ref(['离婚', '战神', '重生', '逆袭', '神医', '千金', '豪门', '甜宠']);
 
@@ -178,6 +178,7 @@ createApp({
     async function handleSearch() {
       if (!searchKeyword.value.trim()) return;
       submittedKeyword = searchKeyword.value.trim();
+      currentTab.value = 'search';
       currentPage.value = 1;
       leaveTheater();
       return loadCatalog();
