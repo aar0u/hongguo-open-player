@@ -757,6 +757,91 @@ test('index.html layout places favorite button to the left of sidebar-toggle-btn
   assert.ok(html.includes("sidebarOpen ? '收起选集' : '展开选集'"));
 });
 
+test('drama detail modal state opens on openDramaDetail and closes on Escape/closeDramaDetail', () => {
+  const state = client(async () => response([]));
+  state.mountForTest();
+  assert.equal(state.showDramaDetailModal.value, false);
+
+  state.activeSeries.value = {
+    series_id: '123',
+    series_title: '测试短剧',
+    intro: '这是一部精彩短剧的简介',
+    tags: ['都市', '逆袭']
+  };
+
+  // Open drama detail
+  state.openDramaDetail();
+  assert.equal(state.showDramaDetailModal.value, true);
+
+  // Close via onDramaModalKeydown with Escape
+  let stopped = false, prevented = false;
+  state.onDramaModalKeydown({
+    key: 'Escape',
+    stopPropagation: () => { stopped = true; },
+    preventDefault: () => { prevented = true; }
+  });
+  assert.equal(state.showDramaDetailModal.value, false);
+  assert.ok(stopped && prevented);
+
+  // Reopen and close via closeDramaDetail
+  state.openDramaDetail();
+  assert.equal(state.showDramaDetailModal.value, true);
+  state.closeDramaDetail();
+  assert.equal(state.showDramaDetailModal.value, false);
+});
+
+test('index.html includes sidebar drama header with fav heart icon button and drama detail modal with cast section', () => {
+  const path = require('node:path');
+  const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
+  assert.ok(html.includes('class="sidebar-fav-icon-btn"'), 'Heart icon button in top right must exist');
+  assert.ok(html.includes('class="fav-heart-icon"'), 'Heart icon must exist');
+  assert.ok(html.includes('class="sidebar-intro-preview"'), 'Intro preview in sidebar header must exist');
+  assert.ok(html.includes('class="drama-modal-overlay"'), 'Drama detail modal overlay must exist');
+  assert.ok(html.includes('class="drama-modal"'), 'Drama modal dialog must exist');
+  assert.ok(html.includes('class="drama-cast-section"'), 'Cast section in drama modal must exist');
+  assert.ok(html.includes('openActorFromDrama'), 'Clicking cast card must trigger openActorFromDrama');
+});
+
+test('openActorFromDrama closes drama detail modal and opens actor detail', async () => {
+  let actorDetailRequested = null;
+  const state = client(async (url) => {
+    if (url.includes('/api/actors/')) {
+      actorDetailRequested = url;
+      return response({
+        success: true,
+        actor: {
+          actor_id: '7602119348190205246',
+          name: '王妈',
+          avatar: 'https://example.com/avatar.jpg'
+        },
+        works: []
+      });
+    }
+    return response([]);
+  });
+  state.mountForTest();
+
+  state.activeSeries.value = {
+    series_id: '123',
+    series_title: '测试短剧',
+    celebrities: [
+      { actor_id: '7602119348190205246', name: '王妈', role: '饰 王妈', avatar: 'https://example.com/avatar.jpg' }
+    ]
+  };
+
+  // 1. Open drama detail modal
+  state.openDramaDetail();
+  assert.equal(state.showDramaDetailModal.value, true);
+
+  // 2. Click actor in drama
+  state.openActorFromDrama(state.activeSeries.value.celebrities[0]);
+  assert.equal(state.showDramaDetailModal.value, false, 'Drama detail modal should close');
+  assert.ok(state.activeActor.value, 'Actor modal should open with activeActor set');
+  assert.equal(state.activeActor.value.actor_id, '7602119348190205246');
+  assert.equal(state.activeActor.value.name, '王妈');
+});
+
+
 
 
 
