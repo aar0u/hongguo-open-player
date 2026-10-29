@@ -13,6 +13,9 @@ on:
       - 'tv-app/**'
       - '.github/workflows/tv-apk.yml'
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-24.04
@@ -47,3 +50,13 @@ jobs:
         with:
           name: hongguo-tv-apk
           path: tv-app/app/build/outputs/apk/debug/app-debug.apk
+
+      # Release assets of a public repo download without a login, unlike artifacts.
+      - name: Publish to the tv-latest prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete tv-latest --cleanup-tag --yes || true
+          gh release create tv-latest tv-app/app/build/outputs/apk/debug/app-debug.apk \
+            --prerelease --target "$GITHUB_SHA" --title "TV APK (latest build)" \
+            --notes "Debug APK built from $GITHUB_SHA"
