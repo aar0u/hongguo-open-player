@@ -10,7 +10,7 @@ const CACHE_TTL_MS = 900000; // 15分钟会话缓存
 const WORKS_CACHE_TTL_MS = 300000; // 5分钟作品缓存
 const TIMEOUT_MS = 15000;
 
-let activeSession = null;
+const sessionsByLimit = new Map(); // pageLimit -> session object
 const worksCache = new Map();
 
 function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
@@ -18,7 +18,7 @@ function actorError(message, code = 'ACTOR_SCHEMA', status = 400) {
 }
 
 function clearActorSession() {
-  activeSession = null;
+  sessionsByLimit.clear();
 }
 
 function clearWorksCache() {
@@ -224,10 +224,19 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
   const pageLimit = Math.max(1, Math.min(50, parseInt(limit, 10) || 20));
   const now = Date.now();
 
-  // 1. 命中内存缓存直接返回
-  if (activeSession && activeSession.expiresAt > now && activeSession.pages.has(pageNum)) {
-    const cached = activeSession.pages.get(pageNum);
-    logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}`);
+  // 清理过期会话
+  for (const [k, sess] of sessionsByLimit.entries()) {
+    if (sess.expiresAt <= now) {
+      sessionsByLimit.delete(k);
+    }
+  }
+
+  let session = sessionsByLimit.get(pageLimit);
+
+  // 1. 命中对应条数 limit 的内存缓存直接返回
+  if (session && session.expiresAt > now && session.pages.has(pageNum)) {
+    const cached = session.pages.get(pageNum);
+    logger.debug('HongguoActor', `命中剧星榜内存缓存: page=${pageNum}, limit=${pageLimit}`);
     return {
       success: true,
       actors: cached.actors,
@@ -240,23 +249,24 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
     };
   }
 
-  // 2. 若请求第 2 页及以上，但会话已失效或游标未链式推进至 pageNum，顺序重构从第 1 页至 pageNum-1
-  if (pageNum > 1 && (!activeSession || activeSession.expiresAt <= now || !activeSession.pageOffsets?.has(pageNum))) {
-    if (!activeSession || activeSession.expiresAt <= now) {
-      clearActorSession();
+  // 2. 若请求第 2 页及以上，但该 limit 下的会话已失效或游标未链式推进至 pageNum，顺序重构从第 1 页至 pageNum-1
+  if (pageNum > 1 && (!session || session.expiresAt <= now || !session.pageOffsets?.has(pageNum))) {
+    if (!session || session.expiresAt <= now) {
+      sessionsByLimit.delete(pageLimit);
     }
-    logger.info('HongguoActor', `剧星榜会话未就绪或未推进至第 ${pageNum} 页，从第 1 页顺序建立分页游标`);
+    logger.info('HongguoActor', `剧星榜会话未就绪或未推进至第 ${pageNum} 页 (limit=${pageLimit})，从第 1 页顺序建立分页游标`);
     for (let p = 1; p < pageNum; p++) {
       const stepRes = await fetchActorRankings({ page: p, limit: pageLimit, request });
       if (!stepRes.has_more) {
         throw actorError('已到达榜单末尾，无更多演员数据', 'ACTOR_PAGE_OVERFLOW', 400);
       }
     }
+    session = sessionsByLimit.get(pageLimit);
   }
 
   // 3. 构建当前页请求参数
   let values;
-  if (pageNum === 1 || !activeSession) {
+  if (pageNum === 1 || !session) {
     values = {
       tab_type: '26',
       client_req_type: '2',
@@ -276,7 +286,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       unlimited_selector_change_type: '0'
     };
   } else {
-    const currentOffset = activeSession.pageOffsets?.get(pageNum);
+    const currentOffset = session.pageOffsets?.get(pageNum);
     values = {
       tab_type: '18',
       client_req_type: '2',
@@ -289,7 +299,7 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       gender: '2',
       limit: String(pageLimit),
       offset: String(currentOffset !== undefined ? currentOffset : (pageNum - 1) * pageLimit),
-      session_id: activeSession.sessionId || '',
+      session_id: session.sessionId || '',
       background_selected_items: '',
       panel_selected_items: '',
       filter_ids: '',
@@ -300,12 +310,13 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
   const signed = signedMetadataRequest('/reading/bookapi/bookmall/cell/change/v', values);
   const payload = await request(signed, Date.now() + TIMEOUT_MS);
 
-  const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession });
+  const parsed = parseRankingPayload(payload, { pageNum, pageLimit, activeSession: session });
   const { actors, rankDate, hasMore, nextOffset, sessionId } = parsed;
 
-  // 4. 更新会话与游标映射
-  if (!activeSession || pageNum === 1) {
-    activeSession = {
+  // 4. 更新该 limit 的会话与游标映射
+  if (!session || pageNum === 1) {
+    session = {
+      limit: pageLimit,
       sessionId,
       nextOffset,
       rankDate,
@@ -313,16 +324,17 @@ async function fetchActorRankings({ page = 1, limit = 20, request = defaultReque
       pages: new Map(),
       pageOffsets: new Map([[1, 0]])
     };
+    sessionsByLimit.set(pageLimit, session);
   } else {
-    activeSession.nextOffset = nextOffset;
-    if (sessionId) activeSession.sessionId = sessionId;
+    session.nextOffset = nextOffset;
+    if (sessionId) session.sessionId = sessionId;
   }
   if (nextOffset !== undefined) {
-    activeSession.pageOffsets.set(pageNum + 1, nextOffset);
+    session.pageOffsets.set(pageNum + 1, nextOffset);
   }
-  activeSession.pages.set(pageNum, { actors, rankDate, hasMore });
+  session.pages.set(pageNum, { actors, rankDate, hasMore });
 
-  logger.info('HongguoActor', `成功获取剧星榜: 第 ${pageNum} 页, 共 ${actors.length} 位演员, 统计截至=${rankDate || '最新'}`);
+  logger.info('HongguoActor', `成功获取剧星榜: 第 ${pageNum} 页 (limit=${pageLimit}), 共 ${actors.length} 位演员, 统计截至=${rankDate || '最新'}`);
   return {
     success: true,
     actors,

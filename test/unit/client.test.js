@@ -482,5 +482,65 @@ test('actor works failure displays error and retry recovers state', async () => 
   assert.equal(state.actorWorks.value[0].series_title, '重试成功的作品');
 });
 
+test('stale actor ranking responses do not overwrite current page after switching tabs or pages', async () => {
+  const pendingRequests = new Map();
+  const state = client(url => new Promise(resolve => {
+    pendingRequests.set(url, resolve);
+  }));
+
+  // 1. Enter actors tab
+  state.switchTab('actors');
+  assert.equal(state.currentTab.value, 'actors');
+  assert.equal(state.actorPage.value, 1);
+
+  // Resolve page 1
+  pendingRequests.get('/api/actors/ranking?page=1')(response({
+    success: true,
+    rank_date: '2026-10-29',
+    has_more: true,
+    actors: [{ actor_id: '1', name: '第1页演员1', rank: 1 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.actors.value[0].name, '第1页演员1');
+
+  // 2. Request page 2
+  state.changeActorPage(1);
+  assert.equal(state.actorPage.value, 2);
+  const p2Resolve = pendingRequests.get('/api/actors/ranking?page=2');
+  assert.ok(p2Resolve);
+
+  // 3. While page 2 is pending, switch to 'hot-drama', then return to 'actors'
+  state.switchTab('hot-drama');
+  assert.equal(state.currentTab.value, 'hot-drama');
+  state.switchTab('actors');
+  assert.equal(state.currentTab.value, 'actors');
+  assert.equal(state.actorPage.value, 1);
+
+  // 4. Resolve the new page 1 request
+  const newP1Resolve = pendingRequests.get('/api/actors/ranking?page=1');
+  newP1Resolve(response({
+    success: true,
+    rank_date: '2026-10-29',
+    has_more: true,
+    actors: [{ actor_id: '1', name: '最新第1页演员', rank: 1 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.actors.value[0].name, '最新第1页演员');
+
+  // 5. Now the stale page 2 request finally arrives late!
+  p2Resolve(response({
+    success: true,
+    rank_date: '2026-10-29',
+    has_more: true,
+    actors: [{ actor_id: '21', name: '迟到的第2页演员', rank: 21 }]
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Must NOT overwrite page 1!
+  assert.equal(state.actorPage.value, 1);
+  assert.equal(state.actors.value[0].name, '最新第1页演员');
+  assert.equal(state.actors.value[0].rank, 1);
+});
+
 
 

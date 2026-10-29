@@ -38,6 +38,7 @@ createApp({
     const loadingMoreWorks = ref(false);
     const actorWorksError = ref('');
     let currentActorRequestId = 0;
+    let actorRankingRequestId = 0;
 
     // 剧场模式与播放器
     const videoEl = ref(null);
@@ -216,6 +217,9 @@ createApp({
         actorPage.value = 1;
         loadActorRankings();
       } else {
+        // 切出剧星榜时立即使进行中的榜单请求失效，避免晚到数据污染
+        actorRankingRequestId++;
+        loadingActors.value = false;
         currentPage.value = 1;
         loadCatalog();
       }
@@ -233,10 +237,18 @@ createApp({
     // ================= 剧星榜（演员排行榜）逻辑 =================
 
     async function loadActorRankings() {
+      const requestId = ++actorRankingRequestId;
+      const targetPage = actorPage.value;
       loadingActors.value = true;
       try {
-        const response = await fetch(`/api/actors/ranking?page=${actorPage.value}`);
+        const response = await fetch(`/api/actors/ranking?page=${targetPage}`);
         const data = await response.json();
+
+        // 校验请求新鲜度：若已被新请求取代、已切出剧星榜、或当前展示页码已变更，丢弃旧响应
+        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage) {
+          return;
+        }
+
         if (!response.ok || !data.success || !Array.isArray(data.actors)) {
           throw new Error(data.error || `加载剧星榜失败 (${response.status})`);
         }
@@ -244,6 +256,9 @@ createApp({
         actorRankDate.value = data.rank_date || '';
         actorHasMore.value = !!data.has_more;
       } catch (err) {
+        if (requestId !== actorRankingRequestId || currentTab.value !== 'actors' || actorPage.value !== targetPage) {
+          return;
+        }
         console.error('加载剧星榜失败:', err);
         notify(err.message || '剧星榜加载失败，请重试');
         if (actorPage.value > 1) {
@@ -255,7 +270,9 @@ createApp({
         actors.value = [];
         actorHasMore.value = false;
       } finally {
-        loadingActors.value = false;
+        if (requestId === actorRankingRequestId) {
+          loadingActors.value = false;
+        }
       }
     }
 
