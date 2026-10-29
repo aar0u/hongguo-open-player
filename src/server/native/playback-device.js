@@ -6,6 +6,7 @@
 // Changes: fixed anonymous phone profile; process-only identity; no cookies or tokens.
 const crypto = require('node:crypto');
 const { gzipSync } = require('node:zlib');
+const logger = require('../services/logger');
 
 const REGISTER_URL = 'https://log5-applog-lf.fqnovel.com/service/2/device_register/?tt_data=a&cronet_version=8d40f833_2026-03-03&ttnet_version=4.2.243.31-douyin&use_store_region_cookie=1';
 const KDF_SALT = Buffer.from('4dd4c2e6b83162090e52b3c7a6733ba41cb2462b829ab58a196b39db57177524f49baf7f08e8d68d26a72e37c1a95a2f1f05a51892aef2949732b62a38aadd58', 'hex');
@@ -76,6 +77,7 @@ function createPlaybackDeviceRegistrar() {
         // same encrypted payload and identity, including after an exhausted attempt.
         registration ||= Promise.resolve().then(async () => {
             request ||= createRegistrationRequest();
+            logger.info('PlaybackDevice', `开始匿名设备注册, cdid=${request.cdid}`);
             const deadline = Date.now() + 8000;
             for (let attempt = 0; attempt < 3; attempt++) {
                 try {
@@ -89,6 +91,7 @@ function createPlaybackDeviceRegistrar() {
                     const device_id = responseId(response, 'device_id');
                     const iid = responseId(response, 'install_id');
                     if (!device_id || !iid) throw Object.assign(new Error('Invalid registration'), { code: 'INVALID_REGISTRATION' });
+                    logger.info('PlaybackDevice', `匿名设备注册成功: device_id=${device_id}, iid=${iid}`);
                     return Object.freeze({ device_id, iid, cdid: request.cdid });
                 } catch (error) {
                     if (attempt === 2 || !retryable(error) || Date.now() >= deadline) throw error;
@@ -98,6 +101,7 @@ function createPlaybackDeviceRegistrar() {
         }).catch(error => {
             registration = undefined;
             const reason = error.status ? `HTTP ${error.status}` : error.code || 'INVALID_RESPONSE';
+            logger.error('PlaybackDevice', `匿名设备注册失败: ${reason}`);
             throw Object.assign(new Error(`匿名播放设备注册失败（${reason}），请稍后重试`), {
                 code: 'DEVICE_REGISTRATION_FAILED', cause: error,
             });

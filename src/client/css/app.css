@@ -442,6 +442,19 @@ html.platform-mac .app-header {
   background-color: #08090d;
   position: relative;
   border-right: 1px solid var(--border-color);
+  outline: none;
+}
+
+.player-container:focus {
+  outline: none;
+}
+
+.theater-view button:focus:not(:focus-visible),
+.theater-view .ctrl-btn:focus,
+.theater-view .episode-btn:focus,
+.theater-view .group-tab-item:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .player-header {
@@ -917,8 +930,8 @@ html.platform-mac .app-header {
 .progress-bar-buffered, .progress-bar-played { top: 9px; height: 6px; pointer-events: none; }
 .progress-bar-thumb { pointer-events: none; z-index: 1; }
 .seek-input { position: absolute; inset: 0; width: 100%; height: 24px; opacity: 0; cursor: pointer; z-index: 2; }
-.progress-bar-container:focus-within { outline: 2px solid white; outline-offset: 2px; }
-.progress-bar-container:focus-within .progress-bar-thumb { display: block; }
+.progress-bar-container:has(.seek-input:focus-visible) { outline: 2px solid white; outline-offset: 2px; }
+.progress-bar-container:has(.seek-input:focus-visible) .progress-bar-thumb { display: block; }
 .progress-time-tooltip { position: absolute; bottom: 28px; transform: translateX(-50%); padding: 4px 7px; background: #262c3a; border-radius: 4px; pointer-events: none; white-space: nowrap; }
 .app-toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); padding: 12px 20px; background: #262c3a; color: white; box-shadow: var(--shadow); border-radius: 10px; z-index: 300; max-width: 90vw; }
 .player-osd { position: absolute; top: 45%; left: 50%; transform: translate(-50%, -50%); background: #14171fe6; color: white; padding: 12px 24px; border-radius: 12px; z-index: 10; pointer-events: none; }

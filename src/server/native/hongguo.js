@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { URL } = require('node:url');
 const { normalizeDownloadQuality } = require('./download-quality');
 const { isPublicMediaUrl, webMediaRequestOptions } = require('./web-media-guard');
+const logger = require('../services/logger');
 
 const API = "https://api5-normal-sinfonlineb.fqnovel.com";
 const UA = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)";
@@ -487,6 +488,7 @@ async function fetchEpisodeListFresh(seriesId, { deadline = 0 } = {}) {
     return await fetchEpisodeListFromWeb(seriesId, deadline);
   } catch (error) {
     webError = error;
+    logger.warn('HongguoNative', `官网网页分集获取未命中，回退至App备用接口: seriesId=${seriesId}, 原因: ${error.message}`);
   }
   const body = {
     biz_param: DETAIL_BIZ_PARAM,
@@ -1133,8 +1135,10 @@ function decryptMp4Buffer(input, key) {
   const newMoov = rebuildMoov(data, moov.off, moov.size, top, order);
   const out = order.map(box => box.typ === 'moov'
     ? newMoov : data.subarray(box.off, box.off + box.size));
+  const finalBuf = Buffer.concat(out);
+  logger.info('HongguoDecrypt', `全量 MP4 CENC 解密与容器重写完成: 输入=${total} 字节, 输出=${finalBuf.length} 字节`);
 
-  return Buffer.concat(out);
+  return finalBuf;
 }
 
 function createMp4StreamingPlan(metadata, boxes, total) {

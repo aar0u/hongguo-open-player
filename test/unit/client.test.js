@@ -126,3 +126,114 @@ test('scrubbing clamps positions and ignores playback time updates while draggin
   state.finishScrubbing();
   assert.equal(state.isScrubbing.value, false);
 });
+
+test('shortcuts work when focus is on buttons and range inputs, and ignore text inputs', () => {
+  const listeners = {};
+  let paused = true;
+  let blurred = 0;
+  let prevented = 0;
+  const prevent = () => { prevented++; };
+  const blur = () => { blurred++; };
+  const video = {
+    get paused() { return paused; },
+    play: async () => { paused = false; },
+    pause: () => { paused = true; },
+    currentTime: 20
+  };
+  const state = client(async () => response([]), { window: { addEventListener: (name, fn) => { listeners[name] = fn; } } });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  state.videoEl.value = video;
+  state.duration.value = 100;
+  state.activeEpisodeIndex.value = 1;
+  state.activeEpisodes.value = [{ vid_index: 1 }, { vid_index: 2 }, { vid_index: 3 }];
+
+  // 1. When focus is on a button (e.g. Pause, Fullscreen), Space toggles play and prevents button activation
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'Space', key: ' ', preventDefault: prevent });
+  assert.equal(paused, false);
+  assert.equal(prevented, 1);
+  assert.equal(blurred, 1);
+
+  // 2. ArrowDown / PageDown switches episode even if button is focused
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'ArrowDown', key: 'ArrowDown', preventDefault: prevent });
+  assert.equal(state.activeEpisodeIndex.value, 2);
+
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'PageDown', key: 'PageDown', preventDefault: prevent });
+  assert.equal(state.activeEpisodeIndex.value, 3);
+
+  // 3. ArrowUp / PageUp switches to previous episode
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'PageUp', key: 'PageUp', preventDefault: prevent });
+  assert.equal(state.activeEpisodeIndex.value, 2);
+
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'ArrowUp', key: 'ArrowUp', preventDefault: prevent });
+  assert.equal(state.activeEpisodeIndex.value, 1);
+
+  // 4. ArrowLeft / ArrowRight seeks video (+5s from 0 after episode switch)
+  state.duration.value = 100;
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'ArrowRight', key: 'ArrowRight', preventDefault: prevent });
+  assert.equal(video.currentTime, 5);
+
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'ArrowLeft', key: 'ArrowLeft', preventDefault: prevent });
+  assert.equal(video.currentTime, 0);
+
+  // 5. When focus is on a range slider (progress bar), Space toggles play
+  listeners.keydown({ target: { tagName: 'INPUT', type: 'range', blur }, code: 'Space', key: ' ', preventDefault: prevent });
+  assert.equal(paused, true);
+
+  // 6. When typing in a text input (e.g. search box), shortcuts are ignored
+  listeners.keydown({ target: { tagName: 'INPUT', type: 'text' }, code: 'Space', key: ' ', preventDefault: prevent });
+  assert.equal(paused, true); // not toggled
+});
+
+test('clicking controls blurs them and maintains focus on .player-container', () => {
+  let focused = null;
+  const container = {
+    focus() { focused = container; }
+  };
+  const docListeners = {};
+  const doc = {
+    documentElement: { classList: { add() {} } },
+    querySelector(selector) {
+      if (selector === '.player-container') return container;
+      return null;
+    },
+    addEventListener(name, fn) { docListeners[name] = fn; },
+    removeEventListener() {}
+  };
+  const state = client(async () => response([]), {
+    document: doc,
+    window: { addEventListener() {}, removeEventListener() {} }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+
+  // Initially keep focus on player container
+  state.keepPlayerFocus();
+  assert.equal(focused, container);
+
+  // When a button gets focusin, it should blur and restore container focus
+  let buttonBlurred = false;
+  const button = {
+    tagName: 'BUTTON',
+    blur() { buttonBlurred = true; },
+    closest(sel) { return sel === 'button' ? button : null; }
+  };
+  focused = null;
+  docListeners.focusin?.({ target: button });
+  assert.equal(buttonBlurred, true);
+  assert.equal(focused, container);
+
+  // When a range slider gets focusin, it should blur and restore container focus
+  let rangeBlurred = false;
+  const range = {
+    tagName: 'INPUT',
+    type: 'range',
+    blur() { rangeBlurred = true; }
+  };
+  focused = null;
+  docListeners.focusin?.({ target: range });
+  assert.equal(rangeBlurred, true);
+  assert.equal(focused, container);
+});
+
+

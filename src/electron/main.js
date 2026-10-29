@@ -24,6 +24,14 @@ function createWindow() {
 async function buildWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
   process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
+  process.env.HONGGUO_LOG_DIR = path.join(app.getPath('userData'), 'logs');
+  let logger;
+  try {
+    logger = require('../server/services/logger');
+  } catch {
+    logger = { info() {}, error() {}, warn() {}, debug() {}, getLogDir() { return ''; }, getLogFilePath() { return ''; } };
+  }
+  logger.info('Electron', `正在启动原生客户端: 架构=${process.arch}, 平台=${process.platform}, 版本=${typeof app.getVersion === 'function' ? app.getVersion() : 'dev'}`);
   const { startServer } = require('../server/index.js');
   serverStart ||= startServer(8899).catch(error => { serverStart = null; throw error; });
   const res = await serverStart;
@@ -164,6 +172,26 @@ function setupMenu() {
           click: async () => {
             await shell.openExternal('https://github.com/zfdang/hongguo-open-player');
           }
+        },
+        { type: 'separator' },
+        {
+          label: '打开日志目录 (Troubleshooting)',
+          click: async () => {
+            const logger = require('../server/services/logger');
+            await shell.openPath(logger.getLogDir());
+          }
+        },
+        {
+          label: '查看当前运行日志',
+          click: async () => {
+            const logger = require('../server/services/logger');
+            const logFile = logger.getLogFilePath();
+            if (require('node:fs').existsSync(logFile)) {
+              await shell.openPath(logFile);
+            } else {
+              dialog.showMessageBox(mainWindow, { type: 'info', title: '日志文件', message: '暂无日志生成' });
+            }
+          }
         }
       ]
     }
@@ -213,6 +241,7 @@ if (!gotTheLock) {
     if (quitting || !serverInstance) return;
     quitting = true;
     event.preventDefault();
+    try { require('../server/services/logger').info('Electron', '应用程序正在退出，保存状态并关闭服务...'); } catch (_) {}
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.destroy();
       mainWindow = null;
