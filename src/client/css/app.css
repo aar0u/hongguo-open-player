@@ -156,18 +156,20 @@ html.platform-mac .app-header {
   border: 1px solid var(--border-color);
   border-radius: 20px;
   padding: 3px 4px 3px 12px;
-  width: 210px;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 240px;
+  -webkit-app-region: no-drag;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .search-box:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow);
-  width: 260px;
 }
 
 .search-icon {
-  font-size: 13px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
   color: var(--text-dim);
   margin-right: 6px;
 }
@@ -178,8 +180,11 @@ html.platform-mac .app-header {
   outline: none;
   color: var(--text-main);
   font-size: 12.5px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
 }
+
+.search-box input::placeholder { color: var(--text-dim); }
 
 .clear-btn {
   background: transparent;
@@ -195,9 +200,10 @@ html.platform-mac .app-header {
 }
 
 .search-btn {
-  background-color: var(--accent);
+  display: none;
+  background-color: transparent;
   border: none;
-  color: #fff;
+  color: var(--text-sub);
   border-radius: 20px;
   padding: 5px 12px;
   font-size: 12px;
@@ -207,8 +213,16 @@ html.platform-mac .app-header {
   transition: background-color 0.2s;
 }
 
-.search-btn:hover {
+.search-box:focus-within .search-btn,
+.search-box.has-query .search-btn {
+  display: inline-flex;
+  background-color: var(--accent);
+  color: #fff;
+}
+
+.search-box .search-btn:hover {
   background-color: var(--accent-hover);
+  color: #fff;
 }
 
 /* 热门标签栏 */
