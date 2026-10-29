@@ -100,6 +100,38 @@ async function buildWindow() {
   }
 }
 
+const GITHUB_REPO_URL = 'https://github.com/zfdang/hongguo-open-player';
+
+function showAboutDialog() {
+  const version = typeof app.getVersion === 'function' ? app.getVersion() : '1.0.0';
+  const iconPath = process.platform === 'darwin'
+    ? path.join(__dirname, '../../build/icon.png')
+    : path.join(__dirname, '../client/assets/app-icon.png');
+  let icon;
+  try {
+    const { nativeImage } = require('electron');
+    if (nativeImage?.createFromPath && require('node:fs').existsSync(iconPath)) {
+      icon = nativeImage.createFromPath(iconPath);
+    }
+  } catch (_) {}
+
+  dialog.showMessageBox(mainWindow || undefined, {
+    type: 'info',
+    title: '关于 红果开放播放器',
+    message: `红果开放播放器 v${version}`,
+    detail: `一款优雅、无广告的开源跨平台红果短剧播放器。\n\n项目开源主页: ${GITHUB_REPO_URL}\n开源许可: GPL-3.0`,
+    buttons: ['访问 GitHub 主页', '确定'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    ...(icon ? { icon } : {})
+  }).then(result => {
+    if (result && result.response === 0) {
+      shell.openExternal(GITHUB_REPO_URL).catch(console.error);
+    }
+  }).catch(console.error);
+}
+
 // 构建原生 macOS 菜单栏
 function setupMenu() {
   const isMac = process.platform === 'darwin';
@@ -109,7 +141,10 @@ function setupMenu() {
           {
             label: '红果开放播放器',
             submenu: [
-              { role: 'about', label: '关于 红果开放播放器' },
+              {
+                label: '关于 红果开放播放器',
+                click: () => showAboutDialog()
+              },
               { type: 'separator' },
               { role: 'services', label: '服务' },
               { type: 'separator' },
@@ -168,9 +203,13 @@ function setupMenu() {
       label: '帮助',
       submenu: [
         {
+          label: '关于 红果开放播放器',
+          click: () => showAboutDialog()
+        },
+        {
           label: 'GitHub 项目主页',
           click: async () => {
-            await shell.openExternal('https://github.com/zfdang/hongguo-open-player');
+            await shell.openExternal(GITHUB_REPO_URL);
           }
         },
         { type: 'separator' },
@@ -216,6 +255,15 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     if (process.platform === 'darwin' && !app.isPackaged) {
       app.dock?.setIcon(path.join(__dirname, '../../build/icon.png'));
+    }
+    if (typeof app.setAboutPanelOptions === 'function') {
+      app.setAboutPanelOptions({
+        applicationName: '红果开放播放器',
+        applicationVersion: typeof app.getVersion === 'function' ? app.getVersion() : '1.0.0',
+        copyright: 'Copyright © 2026 zfdang. Licensed under GPL-3.0.',
+        website: GITHUB_REPO_URL,
+        credits: GITHUB_REPO_URL
+      });
     }
     setupMenu();
     createWindow().catch((err) => {

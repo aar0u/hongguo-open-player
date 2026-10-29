@@ -7,7 +7,7 @@ const { EventEmitter } = require('node:events');
 for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and packaged window options on ${platform}`, async () => {
   const app = new EventEmitter();
   Object.assign(app, { commandLine: { appendSwitch() {} }, requestSingleInstanceLock: () => true,
-    whenReady: () => Promise.resolve(), getPath: () => '/tmp/player-user', quit() {} });
+    whenReady: () => Promise.resolve(), getPath: () => '/tmp/player-user', setAboutPanelOptions() {}, quit() {} });
   const windows = [];
   class Window extends EventEmitter {
     static getAllWindows() { return windows.filter(w => !w.closed); }
@@ -17,9 +17,14 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
     focus() {}
   }
   let starts = 0;
+  let lastMenuTemplate = [];
+  let openedUrl = null;
   const context = { console, process: { platform, env: {} }, __dirname: '/repo/src/electron',
     require(name) {
-      if (name === 'electron') return { app, BrowserWindow: Window, Menu: { buildFromTemplate() {}, setApplicationMenu() {} }, shell: { openExternal: async () => {}, openPath: async () => {} }, dialog: { showErrorBox() {}, showMessageBox() {} } };
+      if (name === 'electron') return { app, BrowserWindow: Window,
+        Menu: { buildFromTemplate(tmpl) { lastMenuTemplate = tmpl; return tmpl; }, setApplicationMenu() {} },
+        shell: { openExternal: async (url) => { openedUrl = url; }, openPath: async () => {} },
+        dialog: { showErrorBox() {}, showMessageBox: async () => ({ response: 0 }) } };
       if (name === '../server/index.js') return { startServer: async () => { starts++; return { server: { close() {} }, port: 8899 }; } };
       if (name === '../server/services/logger') return require('../../src/server/services/logger');
       return require(name);
@@ -46,4 +51,11 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   assert.equal(windows[1].shown, true);
   assert.equal(windows.length, 2);
   assert.equal(windows[1].open({ url: 'file:///etc/passwd' }).action, 'deny');
+  const helpMenu = lastMenuTemplate.find(m => m.label === '帮助');
+  assert.ok(helpMenu);
+  const aboutHelp = helpMenu.submenu.find(i => i.label === '关于 红果开放播放器');
+  assert.ok(aboutHelp);
+  aboutHelp.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(openedUrl, 'https://github.com/zfdang/hongguo-open-player');
 });
