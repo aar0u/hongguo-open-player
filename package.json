@@ -28,9 +28,11 @@
     "directories": {
       "output": "dist-electron"
     },
+    "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
+      "artifactName": "${name}-${version}-mac-${arch}.${ext}",
       "identity": null,
       "target": [
         {
@@ -91,14 +93,19 @@
           ]
         }
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "${name}-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "红果开放播放器"
+      "shortcutName": "红果开放播放器",
+      "artifactName": "${name}-${version}-win-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${name}-${version}-win-${arch}-portable.${ext}"
     },
     "files": [
       "src/**/*",

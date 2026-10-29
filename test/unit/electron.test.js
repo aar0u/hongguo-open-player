@@ -59,3 +59,22 @@ for (const platform of ['darwin', 'win32', 'linux']) test(`desktop lifecycle and
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(openedUrl, 'https://github.com/zfdang/hongguo-open-player');
 });
+
+test('packaging artifact names use english hongguo-open-player without breaking chinese productName', () => {
+  const pkg = require('../../package.json');
+  assert.equal(pkg.build.productName, '红果开放播放器');
+  assert.ok(pkg.build.artifactName.startsWith('${name}-'));
+  assert.equal(pkg.build.mac.artifactName, '${name}-${version}-mac-${arch}.${ext}');
+  assert.equal(pkg.build.win.artifactName, '${name}-${version}-win-${arch}.${ext}');
+  assert.equal(pkg.build.nsis.artifactName, '${name}-${version}-win-${arch}-setup.${ext}');
+  assert.equal(pkg.build.portable.artifactName, '${name}-${version}-win-${arch}-portable.${ext}');
+  for (const pattern of [
+    pkg.build.artifactName,
+    pkg.build.mac.artifactName,
+    pkg.build.win.artifactName,
+    pkg.build.nsis.artifactName,
+    pkg.build.portable.artifactName,
+  ]) {
+    assert.ok(/^[\w-${}.]+$/.test(pattern), `Pattern ${pattern} contains disallowed characters`);
+  }
+});

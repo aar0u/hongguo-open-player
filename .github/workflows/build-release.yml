@@ -134,11 +134,14 @@ jobs:
 
             #### 📥 下载安装方式：
             - **Windows (x64)**：
-              - 安装版：下载 `红果开放播放器-Setup-*.exe`（或包含 Setup 字样），双击根据向导安装。
-              - 免安装便携版：下载 `红果开放播放器-*-win.zip`，解压后双击 `红果开放播放器.exe` 直接运行。
+              - 安装向导版：下载 `hongguo-open-player-*-win-x64-setup.exe`，双击根据向导安装，自动创建桌面与开始菜单快捷方式。
+              - 单文件便携版：下载 `hongguo-open-player-*-win-x64-portable.exe`，双击直接运行。
+              - 绿色免安装 ZIP：下载 `hongguo-open-player-*-win-x64.zip`，解压后双击 `红果开放播放器.exe` 直接运行。
             - **macOS (Apple Silicon M1/M2/M3/M4)**：
-              - 下载 `红果开放播放器-*-arm64.dmg`，双击拖入 `Applications` 即可。
+              - 安装镜像：下载 `hongguo-open-player-*-mac-arm64.dmg`，双击拖入 `Applications` 即可。
+              - 免安装 ZIP：下载 `hongguo-open-player-*-mac-arm64.zip`，解压后直接运行。
             - **macOS (Intel x64)**：
-              - 下载 `红果开放播放器-*.dmg`，双击拖入 `Applications` 即可。
+              - 安装镜像：下载 `hongguo-open-player-*-mac-x64.dmg`，双击拖入 `Applications` 即可。
+              - 免安装 ZIP：下载 `hongguo-open-player-*-mac-x64.zip`，解压后直接运行。
           files: |
             release-assets/*
