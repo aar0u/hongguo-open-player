@@ -25,3 +25,9 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    // The TV's WebView is Chrome 66 and cannot decode HEVC; Media3 uses the TV's hardware decoder instead.
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+}

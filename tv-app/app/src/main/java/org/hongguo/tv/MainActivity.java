@@ -3,6 +3,7 @@ package org.hongguo.tv;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
@@ -44,7 +45,11 @@ public class MainActivity extends Activity {
         + "if(inner)window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true}));"
         + "return inner;})()";
 
+    // Multiplier on the system's default page scale (setInitialScale takes an absolute percentage).
+    private static final float UI_SCALE = 1.15f;
+
     private WebView web;
+    private NativePlayer nativePlayer;
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
     private FrameLayout root;
@@ -53,7 +58,10 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         root = new FrameLayout(this);
+        root.setBackgroundColor(0xFF08090D);
         web = new WebView(this);
+        // Transparent so the native video surface underneath shows through the page's video area.
+        web.setBackgroundColor(Color.TRANSPARENT);
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
@@ -62,6 +70,11 @@ public class MainActivity extends Activity {
         st.setJavaScriptEnabled(true);
         st.setDomStorageEnabled(true);
         st.setMediaPlaybackRequiresUserGesture(false);
+        // The page is laid out for a desktop window; scale it up so the header and text read from the sofa.
+        web.setInitialScale(Math.round(getResources().getDisplayMetrics().density * 100 * UI_SCALE));
+
+        nativePlayer = new NativePlayer(this, root, web);
+        web.addJavascriptInterface(nativePlayer, "NP");
 
         web.setWebViewClient(new WebViewClient() {
             // The TV's system WebView (Chrome 66 on Android 9) cannot parse the client's modern syntax,
@@ -171,6 +184,7 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         web.onPause();
+        nativePlayer.onPause();
     }
 
     @Override
@@ -181,6 +195,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        nativePlayer.destroy();
         web.destroy();
         super.onDestroy();
     }
