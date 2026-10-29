@@ -10,11 +10,14 @@ import android.view.ViewGroup;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+
+import java.io.IOException;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "hongguo";
@@ -54,12 +57,25 @@ public class MainActivity extends Activity {
         root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
+        WebView.setWebContentsDebuggingEnabled(true);
         WebSettings st = web.getSettings();
         st.setJavaScriptEnabled(true);
         st.setDomStorageEnabled(true);
         st.setMediaPlaybackRequiresUserGesture(false);
 
         web.setWebViewClient(new WebViewClient() {
+            // The TV's system WebView (Chrome 66 on Android 9) cannot parse the client's modern syntax,
+            // so serve the esbuild-transpiled copy that CI bundles into assets/.
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                if (!"/js/app.js".equals(req.getUrl().getPath())) return null;
+                try {
+                    return new WebResourceResponse("application/javascript", "utf-8", getAssets().open("app.js"));
+                } catch (IOException e) {
+                    return null;
+                }
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 view.evaluateJavascript(TV_JS, null);

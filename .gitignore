@@ -6,4 +6,5 @@ data/*.json
 *.log
 *.apk
 tv-app/.gradle/
+tv-app/app/src/main/assets/
 tv-app/**/build/

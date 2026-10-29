@@ -28,6 +28,17 @@ jobs:
         with:
           gradle-version: 8.9
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Transpile client for the TV's old WebView
+        run: |
+          mkdir -p tv-app/app/src/main/assets
+          npx --yes esbuild@0.24.0 src/client/js/app.js --target=chrome66 \
+            --banner:js="$(cat tv-app/legacy-banner.js)" \
+            --outfile=tv-app/app/src/main/assets/app.js
+
       - name: Build debug APK
         working-directory: tv-app
         run: gradle --no-daemon assembleDebug -PserverUrl="${{ inputs.server_url || 'http://192.168.31.217:8899/' }}"
