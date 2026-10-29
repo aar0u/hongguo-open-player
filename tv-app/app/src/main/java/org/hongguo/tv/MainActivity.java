@@ -29,9 +29,10 @@ public class MainActivity extends Activity {
     private static final String TV_JS =
         "(function(){if(window.__tv)return;window.__tv=1;"
         + "var s=document.createElement('style');"
-        // Buttons sit inside overflow containers (the nav bar), which clip an outer outline, so draw it inside and tint the fill.
-        + "s.textContent='.drama-card:focus,.actor-card:focus{outline:4px solid #ffb300!important;outline-offset:2px}"
-        + "button:focus{outline:3px solid #ffb300!important;outline-offset:-3px!important;background-color:rgba(255,179,0,0.28)!important}';"
+        // Focus reuses the page's own :hover look (see tv-app/transform-css.js). Controls the page gives no hover
+        // style (tabs, favourite buttons, speed select) get a thin accent ring instead of the browser default.
+        + "s.textContent='.drama-card:focus,.actor-card:focus,button:focus,select:focus{outline:none}"
+        + ".group-tab-item:focus,.fav-action-btn:focus,.sidebar-fav-btn:focus,select:focus{outline:2px solid #ff3355;outline-offset:-2px}';"
         + "document.head.appendChild(s);"
         + "function mark(){document.querySelectorAll('.drama-card,.actor-card').forEach(function(e){e.tabIndex=0;});}"
         + "new MutationObserver(mark).observe(document.body,{childList:true,subtree:true});mark();"

@@ -32,9 +32,7 @@
     + 'justify-content:center;background:rgba(0,0,0,.6)}'
     + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
     // Chrome 66 ignores `gap` on flex containers, so the control bar items touch and overlap.
-    + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'
-    + '.player-controls select:focus{outline:3px solid #ffb300!important;outline-offset:-3px!important}'
-    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
+    + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
     + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
   document.head.appendChild(css);
