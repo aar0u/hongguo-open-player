@@ -32,7 +32,11 @@
     + 'justify-content:center;background:rgba(0,0,0,.6)}'
     + '#tv-menu .box{background:#141821;border:1px solid #2a3040;border-radius:16px;padding:18px;min-width:380px}'
     // Chrome 66 ignores `gap` on flex containers, so the control bar items touch and overlap.
-    + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
+    + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'
+    // .ctrl-btn fixes 32x32px, so the text of the aspect button overflowed it and its highlight covered only the middle.
+    + '.fit-btn.ctrl-btn{width:auto!important;height:32px!important;padding:0 12px!important}'
+    // Focus on the player box itself (windowed): the thin accent frame the other controls no longer have.
+    + 'html:not(.np-fs-on) .player-container:focus{outline:2px solid #ffb300!important;outline-offset:-2px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
     + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
   document.head.appendChild(css);
@@ -162,6 +166,13 @@
     if (pc) pc.focus();
   }
 
+  // A native select would open a popup the remote cannot drive; step through the options instead.
+  function cycleSelect(sel) {
+    sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
+    sel.dispatchEvent(new Event('change'));
+    setTimeout(function () { sel.focus(); }, 0); // the page's change handler blurs the select
+  }
+
   function barKey(e, a) {
     var list = barControls();
     var i = list.indexOf(a);
@@ -174,10 +185,7 @@
       leaveBar();
       e.preventDefault();
     } else if (e.key === 'Enter' && a.tagName === 'SELECT') {
-      // A native select would open a popup the remote cannot drive; step through the options instead.
-      a.selectedIndex = (a.selectedIndex + 1) % a.options.length;
-      a.dispatchEvent(new Event('change'));
-      setTimeout(function () { a.focus(); }, 0); // the page's change handler blurs the select
+      cycleSelect(a);
       e.preventDefault();
     }
     e.stopImmediatePropagation();
@@ -215,30 +223,40 @@
     var menu = document.getElementById('tv-menu');
     var a = document.activeElement;
     if (document.querySelector('.theater-view') && !menu) {
-      if (a && a.closest && a.closest('.player-controls')) { barKey(e, a); return; }
-      var inZone = a && a.closest && a.closest(FOCUS_ZONES);
-      if (e.key === 'ArrowDown' && !inZone) {
-        enterBar();
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
-      }
-      if (e.key === 'ArrowUp' && !inZone) {
-        // Down is the control bar, Up is the menu: the Menu panel in fullscreen (no header there), the header otherwise.
-        if (!e.repeat) {
-          if (document.fullscreenElement) window.__tvMenu(); else focusTopMenu();
+      if (!document.fullscreenElement) {
+        // Windowed: the arrow keys belong to the browser's focus navigation (header, episode list, buttons),
+        // and OK on the player goes fullscreen. Hide the key from the page's seek / episode shortcuts.
+        if (e.key.indexOf('Arrow') === 0) { e.stopImmediatePropagation(); return; }
+        if (e.key === 'Enter') {
+          if (a && a.tagName === 'SELECT') {
+            cycleSelect(a);
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
+          if (!a || a === document.body || a.tagName === 'VIDEO' || a.classList.contains('player-container')) {
+            clickSel('button[title^="全屏"]');
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
         }
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
-      }
-      if (e.key === 'ArrowDown' && a.closest('.app-header')) {
-        // From the header back to the player, instead of the browser's pick of whatever is below.
-        a.blur();
-        document.querySelector('.player-container').focus();
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        return;
+      } else {
+        if (a && a.closest && a.closest('.player-controls')) { barKey(e, a); return; }
+        var inZone = a && a.closest && a.closest(FOCUS_ZONES);
+        // Fullscreen: Down is the control bar, Up the menu panel (there is no header), Left/Right seek.
+        if (e.key === 'ArrowDown' && !inZone) {
+          enterBar();
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+        if (e.key === 'ArrowUp' && !inZone) {
+          if (!e.repeat) window.__tvMenu();
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
       }
     }
     var inList = a && a.closest && a.closest('#episode-sidebar, .app-header') && document.querySelector('.theater-view');
