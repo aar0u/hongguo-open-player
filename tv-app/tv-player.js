@@ -36,8 +36,8 @@
     // .ctrl-btn fixes 32x32px, so the text of the aspect button overflowed it and its highlight covered only the middle.
     + '.fit-btn.ctrl-btn{width:auto!important;height:32px!important;padding:0 12px!important}'
     // Focus on the player box itself (windowed): the thin accent frame the other controls no longer have.
-    + 'html:not(.np-fs-on) .player-container:focus{outline:2px solid #ffb300!important;outline-offset:-2px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
-    + 'color:#eee;background:#1d2230;border:3px solid transparent;border-radius:10px}'
+    + 'html:not(.np-fs-on) .player-container:focus{outline:1px solid #ffb300!important;outline-offset:-1px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
+    + 'color:#eee;background:#1d2230;border:2px solid transparent;border-radius:10px}'
     + '#tv-menu button:focus{outline:none!important;border-color:#ffb300;background:#3a3320!important}';
   document.head.appendChild(css);
 
@@ -226,6 +226,16 @@
       if (!document.fullscreenElement) {
         // Windowed: the arrow keys belong to the browser's focus navigation (header, episode list, buttons),
         // and OK on the player goes fullscreen. Hide the key from the page's seek / episode shortcuts.
+        if (e.key === 'ArrowRight' && (!a || a === document.body || a.classList.contains('player-container'))) {
+          // The browser would pick the nearest control inside the player; the episode list is where Right should go.
+          var ep = document.querySelector('.episode-btn.active') || document.querySelector('.episode-btn');
+          if (ep && ep.offsetParent !== null) {
+            ep.focus();
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return;
+          }
+        }
         if (e.key.indexOf('Arrow') === 0) { e.stopImmediatePropagation(); return; }
         if (e.key === 'Enter') {
           if (a && a.tagName === 'SELECT') {
@@ -397,6 +407,12 @@
   };
 
   function scan() {
+    // A focused range input uses the arrow keys to change its own value, which traps D-pad focus (the volume
+    // slider next to fullscreen, the seek bar whose Up/Down also scrub). tabindex=-1 is not enough: directional
+    // navigation still picks such an element and then cannot focus it. Disabled inputs are skipped entirely.
+    document.querySelectorAll('.volume-slider, .seek-input').forEach(function (el) {
+      if (!el.disabled) el.disabled = true;
+    });
     var v = document.querySelector('video.video-element');
     if (!v) { detach(); return; }
     if (v === cur) return;
