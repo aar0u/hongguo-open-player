@@ -19,10 +19,11 @@
   document.head.appendChild(m);
 })();
 
-// Chrome 66 only has the prefixed Fullscreen API; emulate the standard one. The shell window is
-// already full screen, so this only needs to drive the page's own fullscreen layout.
+// Emulate the Fullscreen API on every WebView. Chrome 66 only has the prefixed one, and on newer WebViews the real
+// one swaps the whole WebView for a custom view, which hides the native video surface underneath (black picture,
+// sound still playing). The shell window is already full screen, so this only needs to drive the page's own
+// fullscreen layout.
 (function () {
-  if ('fullscreenElement' in document) return;
   var fs = null;
   function change() {
     document.documentElement.classList.toggle('np-fs-on', !!fs); // tv-player.js hides the header with this
