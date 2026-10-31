@@ -9,7 +9,8 @@ adds an Android TV app (`tv-app/`) that shows the same web UI. Read this before 
 - Work happens on `main`. This fork does not track upstream wholesale: check upstream now and then and take only what
   is useful.
 - Review upstream: `git fetch upstream` and `git log --oneline main..upstream/main`. Take a commit with
-  `git cherry-pick <sha>` (or merge a range), and skip the rest.
+  `git cherry-pick <sha>` (or merge a range), and skip the rest. `UPSTREAM.md` records what was decided so far, and
+  the last step of each review is `git merge -s ours upstream/main` so only new commits show up next time.
 - After taking upstream changes to `src/client`, rebuild and test on a TV. The TV build transpiles `src/client`, so
   upstream UI changes flow in automatically but can break selectors used in `tv-app/tv-player.js` (for example a
   new header control or a renamed class).
