@@ -13,8 +13,9 @@ adds an Android TV app (`tv-app/`) that shows the same web UI. Read this before 
 - After taking upstream changes to `src/client`, rebuild and test on a TV. The TV build transpiles `src/client`, so
   upstream UI changes flow in automatically but can break selectors used in `tv-app/tv-player.js` (for example a
   new header control or a renamed class).
-- Do not run `git push --tags` or push `v*` tags: `build-release.yml` builds Electron installers on `v*` tags, and
-  `git fetch upstream` brings upstream's tags into the local repo.
+- This fork keeps only two workflows: `ci.yml` (offline unit tests) and `tv-apk.yml`. Upstream's
+  `build-release.yml` (Electron installers on `v*` tags) and `live-verification.yml` (calls the real upstream APIs)
+  were removed on purpose. When cherry-picking, leave out upstream commits that only touch those two files.
 - Commit locally with conventional messages. The owner pushes.
 - Files outside `tv-app/` that this edition changes: `src/server/index.js` (`HOST` env var, default `127.0.0.1`),
   `.gitignore`, `start-lan.sh`, `.github/workflows/tv-apk.yml`. Keep that list short so cherry-picks stay clean.
