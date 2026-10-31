@@ -363,8 +363,10 @@
         st.paused = true;
         fire(v, 'ended');
       } else if (event === 'error') {
-        // ExoPlayer IO error codes are 2000-2999; the page maps 2 to "network" and 4 to "cannot decode".
-        st.err = { code: a >= 2000 && a < 3000 ? 2 : 4, message: String(b) };
+        // ExoPlayer IO error codes are 2000-2999. The page maps 2 to "network" and 4 to "bad source"; only code 4
+        // makes it probe the stream URL and show the backend's reason, so a bad HTTP status (2004) must be 4.
+        var badStatus = a === 2004; // ERROR_CODE_IO_BAD_HTTP_STATUS
+        st.err = { code: a >= 2000 && a < 3000 && !badStatus ? 2 : 4, message: String(b) };
         fire(v, 'error');
       } else if (event === 't') {
         st.t = a / 1000;
