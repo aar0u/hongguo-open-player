@@ -1,18 +1,23 @@
 # Agent guide: Android TV port
 
-This repo is a fork of `zfdang/hongguo-open-player` (Electron + Express + Vue). The `tv` branch adds an Android TV
-app that shows the same web UI. Read this before changing anything under `tv-app/`.
+This repo is the TV edition of `zfdang/hongguo-open-player` (Electron + Express + Vue): it keeps the desktop app and
+adds an Android TV app (`tv-app/`) that shows the same web UI. Read this before changing anything under `tv-app/`.
 
 ## Branches and upstream
 
-- Remotes: `origin` is the fork (`aar0u/hongguo-open-player`), `upstream` is `zfdang/hongguo-open-player`.
-- `main` mirrors upstream. All TV work lives on `tv`. Do not merge `tv` into `main`.
-- Sync upstream: update `main` (GitHub "Sync fork" or `git merge --ff-only upstream/main`), then merge `main` into `tv`,
-  then rebuild and test on a TV. The TV build transpiles `src/client`, so upstream UI changes flow in
-  automatically but can break selectors used in `tv-app/tv-player.js`.
+- Remotes: `origin` is this fork (`aar0u/hongguo-open-player`), `upstream` is `zfdang/hongguo-open-player`.
+- Work happens on `main`. This fork does not track upstream wholesale: check upstream now and then and take only what
+  is useful.
+- Review upstream: `git fetch upstream` and `git log --oneline main..upstream/main`. Take a commit with
+  `git cherry-pick <sha>` (or merge a range), and skip the rest.
+- After taking upstream changes to `src/client`, rebuild and test on a TV. The TV build transpiles `src/client`, so
+  upstream UI changes flow in automatically but can break selectors used in `tv-app/tv-player.js` (for example a
+  new header control or a renamed class).
+- Do not run `git push --tags` or push `v*` tags: `build-release.yml` builds Electron installers on `v*` tags, and
+  `git fetch upstream` brings upstream's tags into the local repo.
 - Commit locally with conventional messages. The owner pushes.
-- Files outside `tv-app/` that `tv` changes: `src/server/index.js` (`HOST` env var, default `127.0.0.1`),
-  `.gitignore`, `start-lan.sh`, `.github/workflows/tv-apk.yml`. Keep that list short to keep upstream merges clean.
+- Files outside `tv-app/` that this edition changes: `src/server/index.js` (`HOST` env var, default `127.0.0.1`),
+  `.gitignore`, `start-lan.sh`, `.github/workflows/tv-apk.yml`. Keep that list short so cherry-picks stay clean.
 
 ## Architecture
 
@@ -57,7 +62,8 @@ cd tv-app && JAVA_HOME=... ANDROID_HOME=... gradle --no-daemon -q assembleDebug
 # app/build/outputs/apk/debug/app-debug.apk
 ```
 
-CI (`.github/workflows/tv-apk.yml`) runs the same two steps on push to `tv` and publishes the APK to the public
+CI (`.github/workflows/tv-apk.yml`) runs the same two steps on pushes to `main` that touch `tv-app/` or `src/client/`
+and publishes the APK to the public
 prerelease `tv-latest` (downloadable without login, unlike artifacts). Debug signing keys differ between CI and a local
 machine, so `adb install -r` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; `adb uninstall org.hongguo.tv` first.
 

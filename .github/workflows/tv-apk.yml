@@ -8,9 +8,11 @@ on:
         default: http://192.168.31.217:8899/
   push:
     branches:
-      - tv
+      - main
     paths:
       - 'tv-app/**'
+      # The APK bundles a transpiled copy of the web client.
+      - 'src/client/**'
       - '.github/workflows/tv-apk.yml'
 
 permissions:
