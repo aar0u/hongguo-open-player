@@ -66,8 +66,13 @@ cd tv-app && JAVA_HOME=... ANDROID_HOME=... gradle --no-daemon -q assembleDebug
 
 CI (`.github/workflows/tv-apk.yml`) runs the same two steps on pushes to `main` that touch `tv-app/` or `src/client/`
 and publishes the APK to the public
-prerelease `tv-latest` (downloadable without login, unlike artifacts). Debug signing keys differ between CI and a local
-machine, so `adb install -r` fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; `adb uninstall org.hongguo.tv` first.
+prerelease `tv-latest` (downloadable without login, unlike artifacts).
+
+Signing: CI and local builds use the same fixed debug key, stored as base64 in `tv-app/debug.keystore.b64` (PKCS12,
+alias `androiddebugkey`, password `android`) and decoded by `tv-app/app/build.gradle`. It is not a secret. So
+`adb install -r` updates in place and keeps the app's settings. Only an APK built before this key existed (random
+per-build debug key) needs `adb uninstall org.hongguo.tv` once, after which updates work. If
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` appears again, the installed app was signed with another key.
 
 ## Test loop (adb)
 

@@ -2,9 +2,25 @@ plugins {
     id 'com.android.application'
 }
 
+// A fixed debug signing key, kept in the repo as base64 text. It is not a secret: it only makes CI and local builds
+// carry the same signature, so `adb install -r` can update an installed app in place and keep its settings.
+def debugKeystore = layout.buildDirectory.file('debug.p12').get().asFile
+debugKeystore.parentFile.mkdirs()
+debugKeystore.bytes = Base64.mimeDecoder.decode(file('../debug.keystore.b64').text)
+
 android {
     namespace 'org.hongguo.tv'
     compileSdk 34
+
+    signingConfigs {
+        debug {
+            storeFile debugKeystore
+            storeType 'pkcs12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
 
     defaultConfig {
         applicationId 'org.hongguo.tv'
