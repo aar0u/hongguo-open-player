@@ -4,8 +4,7 @@
 // 1. Chrome 66 does not know :fullscreen, and one unknown selector invalidates the whole rule list, so the
 //    page's fullscreen rules (written as `.x:fullscreen, .x.is-fullscreen`) are dropped. Keep only the
 //    `.is-fullscreen` half.
-// 2. A D-pad has no pointer, so give every `:hover` selector a `:focus` twin: the focused control looks the
-//    way the page already styles a hovered one.
+// 2. A D-pad has no pointer, so replace `:hover` selectors with `:focus` to avoid stale hover highlights.
 const fs = require('node:fs');
 
 const file = process.argv[2];
@@ -15,8 +14,7 @@ const out = '#app:not([data-v-app]){visibility:hidden}\n' + css.replace(/([^{}]+
   if (selectors.trim().startsWith('@')) return match;
   const list = selectors.split(',').filter(s => !s.includes(':fullscreen'));
   if (list.length === 0) return match;
-  const focusTwins = list.filter(s => s.includes(':hover')).map(s => s.replace(/:hover/g, ':focus'));
-  return list.concat(focusTwins).join(',') + '{';
+  return list.map(s => s.replace(/:hover/g, ':focus')).join(',') + '{';
 });
 fs.writeFileSync(file, out);
 

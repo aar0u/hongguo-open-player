@@ -21,6 +21,7 @@
     + '.brand-icon{width:40px!important;height:40px!important}'
     + '.brand-name{font-size:19px!important}'
     + '.nav-item{font-size:17px!important;padding:8px 10px!important}'
+    + '.app-header .brand:focus{outline:none;background:#262c3a;border-radius:16px}'
     + '.search-box{padding:6px 8px 6px 16px!important;width:clamp(150px,14vw,200px)!important;min-width:150px!important}'
     + '.search-box input{font-size:18px!important}'
     + '.theater-view{top:84px!important;height:calc(100vh - 84px)!important}'
@@ -35,6 +36,8 @@
     + '.controls-left>*+*,.controls-right>*+*{margin-left:14px!important}'
     // .ctrl-btn fixes 32x32px, so the text of the aspect button overflowed it and its highlight covered only the middle.
     + '.fit-btn.ctrl-btn{width:auto!important;height:32px!important;padding:0 12px!important}'
+    + '.player-controls .ctrl-btn:focus,.player-controls select:focus{outline:3px solid #fff!important;'
+    + 'outline-offset:3px!important;background:#805000!important;box-shadow:0 0 0 6px #ffb300!important}'
     // Focus on the player box itself (windowed): the thin accent frame the other controls no longer have.
     + 'html:not(.np-fs-on) .player-container:focus{outline:1px solid #ffb300!important;outline-offset:-1px!important}'    + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:2px solid transparent;border-radius:10px}'
@@ -109,7 +112,7 @@
       var side = document.querySelector('[aria-controls="episode-sidebar"]');
       var sideOpen = document.getElementById('episode-sidebar') && document.getElementById('episode-sidebar').style.display !== 'none';
       var fullscreen = !!document.fullscreenElement;
-      items.push({ text: fullscreen ? '退出全屏' : '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
+      if (!fullscreen) items.push({ text: '全屏', run: function () { clickSel('button[title^="全屏"]'); } });
       // The episode list and the header are hidden in fullscreen, so those entries only make sense outside it.
       if (!fullscreen) {
         items.push({
@@ -125,6 +128,13 @@
         // After the click handlers: the page returns focus to the player on every button click.
         items.push({ text: '顶部菜单', run: function () { setTimeout(focusTopMenu, 80); } });
         if (side) items.push({ text: sideOpen ? '收起选集栏' : '展开选集栏', run: function () { side.click(); } });
+      }
+      var speed = document.querySelector('.player-controls .speed-selector select');
+      if (speed && speed.options.length) {
+        items.push({ text: '播放速度：' + speed.options[speed.selectedIndex].text, keepOpen: true, run: function (b) {
+          cycleSelect(speed, false);
+          b.textContent = '播放速度：' + speed.options[speed.selectedIndex].text;
+        } });
       }
       items.push({
         text: '退出播放',
@@ -192,10 +202,10 @@
   }
 
   // A native select would open a popup the remote cannot drive; step through the options instead.
-  function cycleSelect(sel) {
+  function cycleSelect(sel, restoreFocus) {
     sel.selectedIndex = (sel.selectedIndex + 1) % sel.options.length;
     sel.dispatchEvent(new Event('change'));
-    setTimeout(function () { sel.focus(); }, 0); // the page's change handler blurs the select
+    if (restoreFocus !== false) setTimeout(function () { sel.focus(); }, 0);
   }
 
   function barKey(e, a) {
@@ -247,6 +257,35 @@
   window.addEventListener('keydown', function (e) {
     var menu = document.getElementById('tv-menu');
     var a = document.activeElement;
+    if (!menu && !document.fullscreenElement && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      var brand = document.querySelector('.app-header .brand');
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('.app-header .nav-item'));
+      var search = document.querySelector('.app-header .search-box input');
+      var tabIndex = tabs.indexOf(a);
+      var target = null;
+      if (tabs.length && (!a || a === document.body) && !document.querySelector('.theater-view')) {
+        target = document.querySelector('.app-header .nav-item.active') || tabs[0];
+      } else if (a === brand && e.key === 'ArrowRight') {
+        target = tabs[0];
+      } else if (tabIndex >= 0) {
+        target = e.key === 'ArrowRight' ? (tabs[tabIndex + 1] || search) : (tabs[tabIndex - 1] || brand);
+      } else if (a === search && e.key === 'ArrowLeft' && a.selectionStart === 0 && a.selectionEnd === 0) {
+        target = tabs[tabs.length - 1];
+      }
+      if (target) {
+        if (target === brand) brand.tabIndex = 0;
+        target.focus();
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+    }
+    if (!menu && e.key === 'Enter' && a && a.matches && a.matches('.app-header .brand')) {
+      a.click();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (document.querySelector('.theater-view') && !menu) {
       if (!document.fullscreenElement) {
         // Windowed: the arrow keys belong to the browser's focus navigation (header, episode list, buttons),
