@@ -60,6 +60,30 @@
     if (e.target.closest && e.target.closest(FOCUS_ZONES)) e.stopImmediatePropagation();
   }, true);
 
+  // The desktop's window click handler blurs buttons after their own click handlers run.
+  document.addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest(FOCUS_ZONES)) e.stopPropagation();
+  });
+
+  var catalogIndex = 0;
+  var wasTheater = false;
+  document.addEventListener('focusin', function (e) {
+    if (!e.target.matches || !e.target.matches('.drama-card') || document.querySelector('.actor-modal-overlay')) return;
+    catalogIndex = Array.prototype.indexOf.call(document.querySelectorAll('.drama-card'), e.target);
+  }, true);
+  new MutationObserver(function () {
+    var theater = !!document.querySelector('.theater-view');
+    if (wasTheater && !theater) {
+      setTimeout(function () {
+        if (document.querySelector('.theater-view')) return;
+        var cards = document.querySelectorAll('.drama-card');
+        var card = cards[Math.max(0, Math.min(catalogIndex, cards.length - 1))];
+        if (card) card.focus();
+      }, 0);
+    }
+    wasTheater = theater;
+  }).observe(document.body, { childList: true, subtree: true });
+
   function menuClose() {
     var m = document.getElementById('tv-menu');
     if (!m) return false;
@@ -105,6 +129,7 @@
       items.push({
         text: '退出播放',
         run: function () {
+          if (document.fullscreenElement) document.exitFullscreen();
           var exit = Array.prototype.slice.call(document.querySelectorAll('.player-header button'))
             .filter(function (b) { return b.textContent.indexOf('退出播放') >= 0; })[0];
           if (exit) exit.click();
@@ -236,6 +261,23 @@
             return;
           }
         }
+        if (e.key === 'ArrowLeft' && a && a.classList.contains('episode-btn')) {
+          var rect = a.getBoundingClientRect();
+          var previous = Array.prototype.some.call(document.querySelectorAll('.episode-btn'), function (el) {
+            var r = el.getBoundingClientRect();
+            return r.right <= rect.left && r.top < rect.bottom && r.bottom > rect.top;
+          });
+          if (!previous) {
+            var player = document.querySelector('.player-container');
+            if (player) {
+              a.blur();
+              player.focus();
+              e.preventDefault();
+              e.stopImmediatePropagation();
+              return;
+            }
+          }
+        }
         if (e.key.indexOf('Arrow') === 0) { e.stopImmediatePropagation(); return; }
         if (e.key === 'Enter') {
           if (a && a.tagName === 'SELECT') {
@@ -275,8 +317,8 @@
     if (menu && arrows.indexOf(e.key) >= 0) {
       var btns = Array.prototype.slice.call(menu.querySelectorAll('button'));
       var i = btns.indexOf(a);
-      var next = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? i - 1 : i + 1;
-      btns[(next + btns.length) % btns.length].focus();
+      var next = i + (e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0);
+      btns[Math.max(0, Math.min(btns.length - 1, next))].focus();
       e.preventDefault();
     }
     e.stopImmediatePropagation();

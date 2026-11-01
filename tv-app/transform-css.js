@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const file = process.argv[2];
 const css = fs.readFileSync(file, 'utf8');
 
-const out = css.replace(/([^{}]+)\{/g, (match, selectors) => {
+const out = '#app:not([data-v-app]){visibility:hidden}\n' + css.replace(/([^{}]+)\{/g, (match, selectors) => {
   if (selectors.trim().startsWith('@')) return match;
   const list = selectors.split(',').filter(s => !s.includes(':fullscreen'));
   if (list.length === 0) return match;
