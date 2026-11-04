@@ -30,6 +30,19 @@ How to review the next batch:
 | `3aef0b5` #41 | Stream errors carry a code; the page explains "device registration blocked" | Taken | Shows the backend's reason on screen. Needed a TV change: ExoPlayer's bad HTTP status maps to media error 4 so the page probes the stream |
 | `34f4a8e` #42, `de2e0f9` #43 | Automatic release versioning | Skip | Desktop release workflow, removed in this fork |
 
+## Reviewed up to `7bea080` (2026-11-05)
+
+| Commit | What it does | Decision | Reason |
+|---|---|---|---|
+| `c32799f` #47 | Signs video model requests | Taken | Server only |
+| `6d51332` #58 | Playback controls and prefetch | Partly taken | Took the server and test parts; the client part depends on danmaku |
+| `c9234ca` #60 | Rapid episode changes (stream service), macOS README | Taken | Server fix |
+| `60e1150` #48, `e17129f` #51 | Version display, playback control layout | Skip | Client UI changes |
+| `52e44f4` #49, `61d9d36` #53, `d8f269d` #54 | Timed danmaku | Skip | Large client change; untested on Chrome 66 and the native video surface |
+| `a8ea3b7` #55, `7bea080` #61 | Recent search history | Skip for now | Client UI; needs D-pad handling |
+| `48cfa4f` #57 | Playback continuity and startup, removes review docs | Skip | Mixed with client danmaku and Electron changes |
+| `eae938f` #52, `cd7f39a` #56 | Release action, README screenshots | Skip | Removed workflow / desktop docs |
+
 ## Open
 
 - Revisit #30 (intro preview) when there is time to make the popup D-pad friendly.
