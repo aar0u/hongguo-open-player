@@ -1062,3 +1062,39 @@ test('late preference loading preserves changes made by the user', async () => {
   assert.equal(state.danmakuRows.value, 5);
   assert.equal(updates[0].playbackRate, '2.0');
 });
+
+test('prefetch is requested near the end using remaining playback time', async () => {
+  const calls = [];
+  const state = client(async (url, options) => {
+    calls.push([url, options]);
+    if (url.startsWith('/api/series/')) return response({ series_id: '123', episodes: [{ vid: '111', vid_index: 1 }, { vid: '222', vid_index: 2 }] });
+    return response({ success: true, items: [] });
+  });
+  await state.openTheater({ series_id: '123' });
+  state.videoEl.value = { currentTime: 100, playbackRate: 2, buffered: { length: 0 } };
+  state.duration.value = 200;
+  state.isPlaying.value = true;
+  state.onTimeUpdate();
+  assert.equal(calls.filter(([url]) => url === '/api/prefetch/222').length, 0);
+  state.videoEl.value.currentTime = 112;
+  state.onTimeUpdate(); state.onTimeUpdate();
+  assert.equal(calls.filter(([url, options]) => url === '/api/prefetch/222' && options.method === 'POST').length, 1);
+});
+
+test('danmaku settings close on outside pointer interactions but remain open inside', () => {
+  const listeners = {};
+  const state = client(async () => response([]), {
+    document: { documentElement: { classList: { add() {} } }, addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener() {} },
+    window: { addEventListener() {}, removeEventListener() {} }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'range', closest: selector => selector === '.danmaku-control' ? {} : null } });
+  assert.equal(state.showDanmakuSettings.value, true);
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'text', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'BUTTON', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+});
