@@ -119,10 +119,10 @@ createApp({
           return text;
         }
       }));
-      danmakuEngine = new Danmaku({ container: layer, media: videoEl.value, comments, speed: Math.max(1, layer.offsetWidth / 10) });
+      danmakuEngine = new Danmaku({ container: layer, media: videoEl.value, comments, speed: danmakuSpeedForWidth(layer.offsetWidth) });
       const resize = () => {
         if (!danmakuEngine || !layer.offsetWidth || !layer.offsetHeight) return;
-        danmakuEngine.speed = layer.offsetWidth / 10;
+        danmakuEngine.speed = danmakuSpeedForWidth(layer.offsetWidth);
         danmakuEngine.resize();
       };
       if (typeof ResizeObserver !== 'undefined') {
@@ -148,7 +148,7 @@ createApp({
         const response = await fetch('/api/preferences');
         if (!response.ok) throw new Error('读取失败');
         const prefs = await response.json();
-        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, volume, isMuted, playbackRate, fitMode };
+        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, danmakuSpeed, volume, isMuted, playbackRate, fitMode };
         for (const [key, value] of Object.entries(prefs)) {
           if (refs[key] && !changedPreferences.has(key)) refs[key].value = value;
         }
@@ -160,6 +160,13 @@ createApp({
         }
       } catch (_) { /* Keep defaults when stored preferences cannot be read. */ }
     }
+    const danmakuSpeed = ref('fast');
+    function danmakuSpeedForWidth(width) {
+      return Math.max(1, width / 10 * ({ fast: 1, medium: 0.75, slow: 0.5 }[danmakuSpeed.value] || 1));
+    }
+    watch(danmakuSpeed, () => {
+      if (danmakuEngine && danmakuLayer.value?.offsetWidth) danmakuEngine.speed = danmakuSpeedForWidth(danmakuLayer.value.offsetWidth);
+    });
     const danmakuRows = ref(3);
     const danmakuOpacity = ref(0.8);
     const danmakuItems = ref([]);
@@ -1475,7 +1482,7 @@ createApp({
     });
 
     return {
-      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
+      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
       isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
