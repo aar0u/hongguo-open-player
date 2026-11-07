@@ -86,6 +86,7 @@ xattr -dr com.apple.quarantine "/Applications/红果开源播放器.app"
 * [📐 产品设计与技术架构（早期方案）](docs/产品设计与技术架构.md)
 * [🔍 参考项目架构解析：hongguo-player](docs/hongguo-player-architecture.md)
 * [🔍 参考项目架构解析：hongguo-drama](docs/hongguo-drama-architecture.md)
+* [🔍 参考项目架构解析：hongguo-downloader（云端交付链路）](docs/hongguo-downloader-architecture.md)
 * [🧪 真机接口验证与方案报告](docs/验证与实现方案.md)
 
 ---
@@ -101,6 +102,9 @@ xattr -dr com.apple.quarantine "/Applications/红果开源播放器.app"
 
 ### 🖥️ 客户端产品与交互设计参考
 * [`yangbin1322/hongguo-player`](https://github.com/yangbin1322/hongguo-player)：原第三方 macOS 客户端，提供了 9:16 沉浸式竖屏观影体验与原型交互参考。
+
+### ☁️ 云端长任务与交付链路参考
+* [`parallelpan/hongguo-downloader`](https://github.com/parallelpan/hongguo-downloader)：公开的架构与工程实践文档（CC BY-NC 4.0，不含可执行源码），提供了表级任务队列、下载与整包打包解耦、OSS 流式 ZIP、伸缩组单机自愈等设计取舍的参考；解析见 [参考项目架构解析：hongguo-downloader](docs/hongguo-downloader-architecture.md)。该项目线上另有按取件集数计费的服务，此处仅作技术交流。
 
 ---
 
