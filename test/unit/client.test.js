@@ -1055,6 +1055,80 @@ test('danmaku heat colors use fixed like thresholds', async () => {
   assert.equal(new Set([10, 100, 500].map(likes => state.danmakuColor({ likes }))).size, 3);
 });
 
+test('danmaku prioritize items accounts for physical length and duration, prioritizing high-likes over blockers', () => {
+  const state = client(async () => response([]));
+  const { prioritizeDanmakuItems, estimateDanmakuWidth, calculateRequiredGap } = state;
+
+  // 1. 物理长度计算：长文本所需的阻挡时间明显长于短文本
+  const shortWidth = estimateDanmakuWidth('短');
+  const longWidth = estimateDanmakuWidth('这是一条非常非常长的大段文字用来阻挡屏幕');
+  assert.ok(longWidth > shortWidth);
+
+  const shortGap = calculateRequiredGap(shortWidth, shortWidth, 800, 16);
+  const longGap = calculateRequiredGap(longWidth, longWidth, 800, 16);
+  assert.ok(shortGap < 1.5, `shortGap should be ~1s, got ${shortGap}`);
+  assert.ok(longGap > 3.0, `longGap should be >3s, got ${longGap}`);
+
+  // 2. 跨秒时空阻挡测试：
+  // 1条长弹幕在 10.0s 进入，因为文本长，需要阻挡该轨道约 3.5s（直到 13.5s 才能容纳新弹幕）。
+  // 即使高赞弹幕在 12.0s（不同秒！）才进入，长弹幕的物理长度仍然阻挡了它；
+  // 开启高赞优先时，应舍弃 0 赞的长弹幕，保留 12.0s 的高赞弹幕上屏。
+  const crossSecondBlock = [
+    { time: 10.0, text: '这是一条非常非常长的大段文字用来阻挡屏幕整个轨道三四秒之久', likes: 0 },
+    { time: 12.0, text: '高赞核心弹幕', likes: 888 }
+  ];
+  // 只有 1 行轨道时
+  const res1 = prioritizeDanmakuItems(crossSecondBlock, { rows: 1, likesPriority: true });
+  assert.equal(res1.length, 1);
+  assert.equal(res1[0].text, '高赞核心弹幕');
+  assert.equal(res1[0].time, 12.0);
+
+  // 3. 多轨道并发与冲突淘汰测试：
+  // 3 条轨道在 10.0s、10.4s、10.8s 分别被 3 条 0 赞长弹幕占满；
+  // 随后的 12.0s、12.5s、13.0s 来了 3 条高赞弹幕（点赞分别为 900, 600, 300）；
+  // 3 条高赞弹幕均应成功替换 0 赞阻挡弹幕并上屏！
+  const multiTrackDense = [
+    { time: 10.0, text: '低赞长弹幕一号阻挡', likes: 0 },
+    { time: 10.4, text: '低赞长弹幕二号阻挡', likes: 0 },
+    { time: 10.8, text: '低赞长弹幕三号阻挡', likes: 0 },
+    { time: 12.0, text: '热评第一', likes: 900 },
+    { time: 12.5, text: '热评第二', likes: 600 },
+    { time: 13.0, text: '热评第三', likes: 300 }
+  ];
+  const res3 = prioritizeDanmakuItems(multiTrackDense, { rows: 3, likesPriority: true });
+  assert.equal(res3.length, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(res3.map(x => x.text))), ['热评第一', '热评第二', '热评第三']);
+
+  // 4. 无冲突时：多条弹幕（即使 0 赞）完全保留
+  const spacedOut = [
+    { time: 0.0, text: '短一', likes: 0 },
+    { time: 5.0, text: '短二', likes: 0 },
+    { time: 10.0, text: '短三', likes: 0 }
+  ];
+  const resSpaced = prioritizeDanmakuItems(spacedOut, { rows: 1, likesPriority: true });
+  assert.equal(resSpaced.length, 3);
+
+  // 5. 关闭高赞优先开关时：保留全量原始弹幕
+  const disabled = prioritizeDanmakuItems(crossSecondBlock, { rows: 1, likesPriority: false });
+  assert.equal(disabled.length, 2);
+});
+
+test('danmaku likes priority toggle updates preference and state', async () => {
+  const preferencesSaved = [];
+  const state = client(async (url, options) => {
+    if (url === '/api/preferences' && options?.method === 'POST') {
+      preferencesSaved.push(JSON.parse(options.body));
+      return response({});
+    }
+    return response({});
+  });
+  assert.equal(state.danmakuLikesPriority.value, true);
+  state.toggleLikesPriority();
+  assert.equal(state.danmakuLikesPriority.value, false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(preferencesSaved.at(-1), { danmakuLikesPriority: false });
+});
+
 test('danmaku engine receives episode comments and is replaced when switching episodes', async () => {
   const instances = [];
   class FakeDanmaku {

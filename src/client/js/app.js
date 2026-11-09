@@ -109,11 +109,161 @@ createApp({
       danmakuEngine?.destroy();
       danmakuEngine = null;
     }
+
+    // 根据文本长度和点赞标识预估弹幕的物理渲染像素宽度
+    function estimateDanmakuWidth(text, likes = 0) {
+      let width = 12; // 基础边距
+      const str = String(text || '');
+      for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        // ASCII 半角字符约 10px，全角/中文约 20px (对应 font-size: 20px)
+        width += (code >= 0x20 && code <= 0x7e) ? 10 : 20;
+      }
+      if (likes > 0) {
+        const likeStr = '+' + likes;
+        width += 6 + likeStr.length * 8;
+      }
+      return width;
+    }
+
+    // 计算两相邻弹幕在同一轨道上不发生碰撞（间距 >= 8px）所需的最小时间差（秒）
+    function calculateRequiredGap(wPrev, wNext, screenWidth, duration) {
+      const gapPrev = duration * (wPrev + 8) / (screenWidth + wPrev);
+      const gapNext = duration * (wNext + 8) / (screenWidth + wNext);
+      return Math.max(gapPrev, gapNext);
+    }
+
+    // 基于真实物理时空长度与多轨道连续调度的弹幕“高赞优先”优选算法
+    function prioritizeDanmakuItems(items, options = {}) {
+      if (!Array.isArray(items) || !items.length) return [];
+      const likesPriority = options.likesPriority !== false;
+      if (!likesPriority) return [...items];
+
+      const rows = Math.max(1, Number(options.rows) || 3);
+      const screenWidth = Math.max(320, Number(options.screenWidth) || 800);
+      const speedOption = options.speed || 'medium';
+      const speedFactor = { fast: 12, medium: 16, slow: 20 }[speedOption] || 16;
+      const duration = speedFactor;
+
+      // 提取并预估每条弹幕的物理属性
+      const candidates = items.map((item, index) => {
+        const likes = Number.isSafeInteger(item.likes) && item.likes > 0 ? item.likes : 0;
+        const time = Number(item.time) || 0;
+        const width = estimateDanmakuWidth(item.text, likes);
+        return {
+          raw: item,
+          time,
+          likes,
+          width,
+          index
+        };
+      });
+
+      // 严格按时间先后排序；同时间点按点赞数降序优先
+      candidates.sort((a, b) => {
+        if (a.time !== b.time) return a.time - b.time;
+        if (b.likes !== a.likes) return b.likes - a.likes;
+        return a.index - b.index;
+      });
+
+      // 初始化每一条轨道的排期列表
+      const tracks = Array.from({ length: rows }, () => ({ items: [] }));
+
+      for (const c of candidates) {
+        let freeTrackIndex = -1;
+        let minGapToLast = Infinity;
+
+        // 1. 查找是否存在无需发生阻挡冲突即可容纳 c 的空闲轨道
+        for (let k = 0; k < rows; k++) {
+          const trackItems = tracks[k].items;
+          if (trackItems.length === 0) {
+            freeTrackIndex = k;
+            break;
+          }
+          const prev = trackItems[trackItems.length - 1];
+          const reqGap = calculateRequiredGap(prev.width, c.width, screenWidth, duration);
+          if (c.time >= prev.time + reqGap) {
+            const gap = c.time - (prev.time + reqGap);
+            if (gap < minGapToLast) {
+              minGapToLast = gap;
+              freeTrackIndex = k;
+            }
+          }
+        }
+
+        if (freeTrackIndex !== -1) {
+          tracks[freeTrackIndex].items.push(c);
+          continue;
+        }
+
+        // 2. 所有轨道均处于阻挡期（发生同屏碰撞冲突！）
+        // 若当前弹幕拥有更高的点赞数，则淘汰正在阻挡它的低赞/0赞弹幕
+        if (c.likes > 0) {
+          let bestReplaceTrack = -1;
+          let minIncumbentLikes = c.likes; // 必须严格低于 c 的点赞数
+          let maxRemainingBlock = -Infinity;
+
+          for (let k = 0; k < rows; k++) {
+            const trackItems = tracks[k].items;
+            const incumbent = trackItems[trackItems.length - 1];
+            if (incumbent.likes >= c.likes) continue; // 现有弹幕点赞数不低于 c，不能替代
+
+            // 检查剔除现有弹幕后，c 与该轨道倒数第二条弹幕是否无冲突
+            let canReplace = true;
+            if (trackItems.length >= 2) {
+              const prevBefore = trackItems[trackItems.length - 2];
+              const reqGapWithPrev = calculateRequiredGap(prevBefore.width, c.width, screenWidth, duration);
+              if (c.time < prevBefore.time + reqGapWithPrev) {
+                canReplace = false;
+              }
+            }
+
+            if (canReplace) {
+              const reqGap = calculateRequiredGap(incumbent.width, c.width, screenWidth, duration);
+              const remainingBlock = (incumbent.time + reqGap) - c.time;
+
+              // 优选原则：优先淘汰点赞最低的；若同为 0 赞，淘汰阻挡时间最长的
+              if (incumbent.likes < minIncumbentLikes ||
+                  (incumbent.likes === minIncumbentLikes && remainingBlock > maxRemainingBlock)) {
+                minIncumbentLikes = incumbent.likes;
+                maxRemainingBlock = remainingBlock;
+                bestReplaceTrack = k;
+              }
+            }
+          }
+
+          if (bestReplaceTrack !== -1) {
+            // 舍弃并替换该轨道上的低赞/0赞弹幕，让高赞弹幕上屏
+            tracks[bestReplaceTrack].items.pop();
+            tracks[bestReplaceTrack].items.push(c);
+          }
+        }
+      }
+
+      // 收集所有成功上轨的弹幕并恢复严格的时间戳顺序
+      const result = [];
+      for (let k = 0; k < rows; k++) {
+        for (const entry of tracks[k].items) {
+          result.push(entry.raw);
+        }
+      }
+
+      result.sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+      return result;
+    }
+
     function startDanmakuAnimation() {
       if (danmakuEngine || !danmakuEnabled.value || !videoEl.value || !danmakuLayer.value || typeof Danmaku === 'undefined') return;
       const layer = danmakuLayer.value;
-      const comments = danmakuItems.value.map(item => ({
+      const prioritized = prioritizeDanmakuItems(danmakuItems.value, {
+        rows: danmakuRows.value,
+        speed: danmakuSpeed.value,
+        screenWidth: layer.offsetWidth || 800,
+        likesPriority: danmakuLikesPriority.value
+      });
+      const comments = prioritized.map(item => ({
         time: item.time,
+        likes: Number(item.likes) || 0,
         render() {
           const text = document.createElement('span');
           text.className = 'danmaku-item';
@@ -157,7 +307,7 @@ createApp({
         const response = await fetch('/api/preferences');
         if (!response.ok) throw new Error('读取失败');
         const prefs = await response.json();
-        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, danmakuSpeed, volume, isMuted, playbackRate, fitMode };
+        const refs = { danmakuEnabled, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuLikesPriority, volume, isMuted, playbackRate, fitMode };
         for (const [key, value] of Object.entries(prefs)) {
           if (refs[key] && !changedPreferences.has(key)) refs[key].value = value;
         }
@@ -177,6 +327,12 @@ createApp({
       if (danmakuEngine && danmakuLayer.value?.offsetWidth) danmakuEngine.speed = danmakuSpeedForWidth(danmakuLayer.value.offsetWidth);
     });
     const danmakuRows = ref(3);
+    const danmakuLikesPriority = ref(true);
+    function toggleLikesPriority() {
+      danmakuLikesPriority.value = !danmakuLikesPriority.value;
+      savePreferences({ danmakuLikesPriority: danmakuLikesPriority.value });
+      refreshDanmakuEngine();
+    }
     const danmakuOpacity = ref(0.8);
     const danmakuItems = ref([]);
     const danmakuStatus = ref('');
@@ -219,7 +375,7 @@ createApp({
       if (likes >= 1) return '#a8dcff';
       return '#ffffff';
     }
-    watch([danmakuLayer, videoEl], refreshDanmakuEngine, { flush: 'post' });
+    watch([danmakuLayer, videoEl, danmakuRows, danmakuSpeed, danmakuLikesPriority], refreshDanmakuEngine, { flush: 'post' });
     const showAboutModal = ref(false);
     const appVersion = ref('');
     const showShortcutsModal = ref(false);
@@ -1788,7 +1944,7 @@ createApp({
     });
 
     return {
-      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
+      savePreferences, danmakuEnabled, showDanmakuSettings, danmakuRows, danmakuOpacity, danmakuSpeed, danmakuLikesPriority, toggleLikesPriority, prioritizeDanmakuItems, estimateDanmakuWidth, calculateRequiredGap, danmakuStatus, danmakuLayer, danmakuColor, toggleDanmaku, loadDanmaku,
       toastText, osdMessage, sidebarOpen, isScrubbing, previewTime, previewPercent, showPreview,
       isFullscreen, isControlsHidden, resetControlsTimer, clearControlsTimer, setControlsHidden, handleWindowMouseMove,
       previewSeek, seekFromSlider, startScrubbing, finishScrubbing,
