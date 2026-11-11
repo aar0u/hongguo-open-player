@@ -226,6 +226,81 @@ test('fallbackToDefault switches to DEFAULT_VERIFIED_DEVICE and updates disk', a
   }
 });
 
+test('rotateDevice registers fresh identity and replaces the persisted device', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-rotate-'));
+  try {
+    const existing = {
+      device_id: '111111111111111',
+      iid: '222222222222222',
+      cdid: '11111111-0000-0000-0000-000000000001',
+      cookie: 'store-region=cn-bj; install_id=222222222222222',
+      created_at: 1700000000000
+    };
+    fs.writeFileSync(path.join(tmpDir, 'device.json'), JSON.stringify(existing), 'utf8');
+
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    const initial = await getDevice(async () => { throw new Error('should not call network'); });
+    assert.equal(initial.device_id, '111111111111111');
+    assert.equal(getDevice.getCurrentDevice()?.device_id, '111111111111111');
+
+    let registrationCalls = 0;
+    const rotateRequest = async (url, options) => {
+      registrationCalls++;
+      assert.ok(url.includes('device_register'));
+      const res = { device_id_str: '999999999999999', install_id_str: '888888888888888', code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': ['store-region=cn-bj; Path=/', 'install_id=888888888888888; Path=/'] },
+        enumerable: false
+      });
+      return res;
+    };
+
+    const newDevice = await getDevice.rotateDevice(rotateRequest);
+    assert.equal(registrationCalls, 1);
+    assert.equal(newDevice.device_id, '999999999999999');
+    assert.equal(newDevice.iid, '888888888888888');
+    assert.notEqual(newDevice.cdid, existing.cdid);
+
+    // Subsequent getDevice calls should return newDevice without hitting network
+    const cached = await getDevice(async () => { throw new Error('should return new cached device'); });
+    assert.equal(cached.device_id, '999999999999999');
+
+    // Persisted file should be updated
+    const filePath = path.join(tmpDir, 'device.json');
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    assert.equal(onDisk.device_id, '999999999999999');
+    assert.equal(onDisk.iid, '888888888888888');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('rotateDevice preserves the old device when registration fails', async () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-dev-rotate-fail-'));
+  const previousEnv = process.env.NODE_ENV;
+  try {
+    const existing = { device_id: '111111111111111', iid: '222222222222222', cdid: 'old-device', created_at: 1700000000000 };
+    const file = path.join(tmpDir, 'device.json');
+    fs.writeFileSync(file, JSON.stringify(existing));
+    const getDevice = createPlaybackDeviceRegistrar({ persist: true, dataDir: tmpDir });
+    await getDevice();
+    process.env.NODE_ENV = 'production';
+    await assert.rejects(getDevice.rotateDevice(async () => { throw Object.assign(new Error('rejected'), { code: 'REGISTRATION_REJECTED' }); }), { code: 'DEVICE_REGISTRATION_FAILED' });
+    assert.equal((await getDevice()).device_id, existing.device_id);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), existing);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('migrates legacy user baseline device on disk to newly registered device', async () => {
   const os = require('node:os');
   const path = require('node:path');
