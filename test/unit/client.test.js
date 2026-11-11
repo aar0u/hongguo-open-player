@@ -203,7 +203,14 @@ test('shortcuts work when focus is on buttons and range inputs, and ignore text 
   listeners.keydown({ target: { tagName: 'INPUT', type: 'range', blur }, code: 'Space', key: ' ', preventDefault: prevent });
   assert.equal(paused, true);
 
-  // 6. When typing in a text input (e.g. search box), shortcuts are ignored
+  // 6. Pressing J toggles sidebarOpen
+  assert.equal(state.sidebarOpen.value, true);
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'KeyJ', key: 'j', preventDefault: prevent });
+  assert.equal(state.sidebarOpen.value, false);
+  listeners.keydown({ target: { tagName: 'BUTTON', blur }, code: 'KeyJ', key: 'J', preventDefault: prevent });
+  assert.equal(state.sidebarOpen.value, true);
+
+  // 7. When typing in a text input (e.g. search box), shortcuts are ignored
   listeners.keydown({ target: { tagName: 'INPUT', type: 'text' }, code: 'Space', key: ' ', preventDefault: prevent });
   assert.equal(paused, true); // not toggled
 });
@@ -1507,4 +1514,44 @@ test('index.html and app.css include multi-season navigation and text selection 
   assert.ok(css.includes('.drama-modal'), 'drama-modal must be styled for selectable text');
   assert.ok(css.includes('.seasons-modal'), 'seasons-modal styles must exist');
   assert.ok(css.includes('.season-playing-tag'), 'season-playing-tag styling must exist');
+});
+
+test('video resolution badge reflects loaded metadata dimensions and keyboard-hints are removed', () => {
+  const path = require('node:path');
+  const html = fs.readFileSync(path.resolve(__dirname, '../../src/client/index.html'), 'utf-8');
+  const css = fs.readFileSync(path.resolve(__dirname, '../../src/client/css/app.css'), 'utf-8');
+
+  // Verify keyboard-hints bar is removed
+  assert.ok(!html.includes('class="keyboard-hints"'), 'keyboard-hints bar should be removed from index.html');
+
+  // Verify resolution badge is in index.html and app.css
+  assert.ok(html.includes('class="resolution-badge"'), 'resolution-badge should be present in index.html');
+  assert.ok(css.includes('.resolution-badge'), '.resolution-badge styling should be in app.css');
+
+  // Verify client resolution logic
+  const state = client(async () => response({}));
+  assert.equal(state.videoResolution.value.width, 0);
+  assert.equal(state.resolutionText.value, '');
+
+  state.videoEl.value = { videoWidth: 1080, videoHeight: 1920, duration: 100, volume: 1, pause() {} };
+  state.onLoadedMetadata();
+  assert.equal(state.videoResolution.value.width, 1080);
+  assert.equal(state.videoResolution.value.height, 1920);
+  assert.equal(state.resolutionText.value, '1080p');
+  assert.ok(state.resolutionTitle.value.includes('1080 × 1920 (1080p)'));
+
+  // Test horizontal 720p
+  state.videoEl.value = { videoWidth: 1280, videoHeight: 720, pause() {} };
+  state.onCanPlay();
+  assert.equal(state.resolutionText.value, '720p');
+
+  // Test 4K
+  state.videoEl.value = { videoWidth: 3840, videoHeight: 2160, pause() {} };
+  state.onCanPlay();
+  assert.equal(state.resolutionText.value, '4K');
+
+  // Test leaving theater resets resolution
+  state.closeTheater();
+  assert.equal(state.videoResolution.value.width, 0);
+  assert.equal(state.resolutionText.value, '');
 });
