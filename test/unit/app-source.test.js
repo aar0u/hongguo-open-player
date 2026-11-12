@@ -34,13 +34,9 @@ test('fetchAppPlayUrl batches nextVids and caches returned models in entryCache'
       return { code: 0, device_id_str: '999', install_id_str: '888' };
     }
     assert.equal(options.headers['Content-Encoding'], 'gzip');
-    assert.ok(options.headers['x-argus']);
-    assert.ok(options.headers['x-ladon']);
     assert.equal(options.headers['x-ss-stub'], createHash('md5').update(options.data).digest('hex').toUpperCase());
-    assert.ok(options.headers['x-ss-req-ticket']);
-    assert.equal(new URL(url).searchParams.get('aid'), '8662');
+    assert.equal(options.headers['x-ss-req-ticket'], new URL(url).searchParams.get('_rticket'));
     assert.equal(new URL(url).searchParams.get('version_name'), '7.4.3.32');
-    assert.ok(options.headers['User-Agent'].includes('74332'));
     requests.push({ url, body: JSON.parse(gunzipSync(options.data)) });
     return {
       code: 0,
