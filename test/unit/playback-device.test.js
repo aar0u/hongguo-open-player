@@ -129,6 +129,24 @@ test('persisted device is loaded from disk and avoids network requests', async (
   }
 });
 
+test('legacy default device is replaced by a registered device', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hg-device-migrate-'));
+  try {
+    const file = path.join(dir, 'device.json');
+    fs.writeFileSync(file, JSON.stringify({ device_id: '1624456208323876', iid: '1624456208327972', cdid: '91d56f7e-c027-4ce9-9a3c-229d59a13c3b' }));
+    let calls = 0;
+    const device = await createPlaybackDeviceRegistrar({ persist: true, dataDir: dir })(async () => { calls++; return success; });
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(fs.readFileSync(file)).device_id, device.device_id);
+    assert.notEqual(device.device_id, '1624456208323876');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('new registration saves device and cookie to disk and reset removes it', async () => {
   const os = require('node:os');
   const path = require('node:path');

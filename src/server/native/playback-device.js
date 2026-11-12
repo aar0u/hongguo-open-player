@@ -161,15 +161,9 @@ function createPlaybackDeviceRegistrar(options = {}) {
         if (currentDevice) return Promise.resolve(currentDevice);
         if (persist) {
             const loaded = loadPersistedDevice(deviceFilePath);
-            if (loaded) {
+            if (loaded && loaded.device_id !== DEFAULT_VERIFIED_DEVICE.device_id) {
                 currentDevice = loaded;
                 logger.info('PlaybackDevice', `已加载本地持久化设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
-                return Promise.resolve(currentDevice);
-            }
-            if (process.env.NODE_ENV !== 'test') {
-                currentDevice = DEFAULT_VERIFIED_DEVICE;
-                savePersistedDevice(deviceFilePath, currentDevice);
-                logger.info('PlaybackDevice', `已初始化基准播放设备: device_id=${currentDevice.device_id}, iid=${currentDevice.iid}`);
                 return Promise.resolve(currentDevice);
             }
         }
@@ -225,6 +219,11 @@ function createPlaybackDeviceRegistrar(options = {}) {
             registration = undefined;
             const reason = error.status ? `HTTP ${error.status}` : error.code || 'INVALID_RESPONSE';
             logger.error('PlaybackDevice', `匿名设备注册失败: ${reason}`);
+            if (process.env.NODE_ENV !== 'test') {
+                logger.warn('PlaybackDevice', `匿名设备注册暂不可用（${reason}），自动降级使用基准播放设备保底`);
+                currentDevice = DEFAULT_VERIFIED_DEVICE;
+                return currentDevice;
+            }
             throw Object.assign(new Error(`匿名播放设备注册失败（${reason}），请稍后重试`), {
                 code: 'DEVICE_REGISTRATION_FAILED', cause: error,
             });

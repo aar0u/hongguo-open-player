@@ -43,6 +43,23 @@ How to review the next batch:
 | `48cfa4f` #57 | Playback continuity and startup, removes review docs | Skip | Mixed with client danmaku and Electron changes |
 | `eae938f` #52, `cd7f39a` #56 | Release action, README screenshots | Skip | Removed workflow / desktop docs |
 
+## Reviewed up to `567b490` (2026-11-12)
+
+| Commit | Decision | Reason |
+|---|---|---|
+| `1d17d88`, `6c50c79` | Partly taken | Playback retries and batching; near-end prefetch UI depends on omitted client features |
+| `43b5e7a`, `963a56d`, `3f687c5` | Taken | Playback request format, device persistence and signing |
+| `b384260` | Partly taken | Device migration only; sidebar and resolution UI depend on omitted changes |
+| `567b490` | Partly taken | Retain playback plans across seeks without ByteVC2 code |
+| `ff975f3`, `2e6bf2b`, `7ea8118`, `f5210f5`, `d8cdc86` | Skip | Danmaku is not included in this fork |
+| `fd9734a`, `c2d4700`, `897b3d9`, `81831d8` | Skip for now | ByteVC2 transcoding and clear-source support need a separate TV playback and build review |
+| `ec9b095`, `33ed623` | Skip for now | Large UI and device-management changes need D-pad integration and TV testing |
+| `ebedd74`, `4fee1ca` | Skip | Upstream reverted the persistence change and replaced it in `963a56d` |
+| `0796543`, `5c199e3`, `6ac87cb`, `36316dc` | Skip | Documentation or desktop build changes |
+
+The unit tests for omitted upstream client features remain skipped. TV asset generation passed, but the APK build and
+device test were not run: the Android toolchain and a connected TV were unavailable.
+
 ## Open
 
 - Revisit #30 (intro preview) when there is time to make the popup D-pad friendly.
