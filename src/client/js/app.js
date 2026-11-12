@@ -175,8 +175,7 @@ createApp({
       // 计算后续分集便于服务端批量拉取与无感预加载
       const nextEp1 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 1);
       const nextEp2 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 2);
-      const nextEp3 = activeEpisodes.value.find(e => e.vid_index === activeEpisodeIndex.value + 3);
-      const nextList = [nextEp1?.vid, nextEp2?.vid, nextEp3?.vid].filter(Boolean);
+      const nextList = [nextEp1?.vid, nextEp2?.vid].filter(Boolean);
       const params = [];
       if (nextEp1?.vid) params.push(`next_vid=${encodeURIComponent(nextEp1.vid)}`);
       if (nextList.length > 1) params.push(`next_vids=${encodeURIComponent(nextList.join(','))}`);
