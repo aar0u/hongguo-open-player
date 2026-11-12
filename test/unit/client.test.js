@@ -796,3 +796,218 @@ test('onVideoError displays custom stream error when probe reports other server 
 
 
 
+
+
+
+test('enabled danmaku loads for each episode and retains display settings', async () => {
+  const calls = [];
+  const state = client(async url => {
+    calls.push(url);
+    if (url.startsWith('/api/danmaku/')) return response({ success: true, items: [], total: 0 });
+    return response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }, { vid: '222222', vid_index: 2 }] });
+  });
+  await state.openTheater({ series_id: '123456' });
+  assert.equal(state.danmakuEnabled.value, true);
+  assert.equal(state.danmakuRows.value, 3);
+  state.danmakuRows.value = 5;
+  state.danmakuOpacity.value = 0.4;
+  state.switchEpisode({ vid_index: 2 });
+  assert.ok(calls.some(url => url.startsWith('/api/danmaku/123456/111111')));
+  assert.ok(calls.some(url => url.startsWith('/api/danmaku/123456/222222')));
+  assert.equal(state.danmakuEnabled.value, true);
+  assert.equal(state.danmakuRows.value, 5);
+  assert.equal(state.danmakuOpacity.value, 0.4);
+});
+
+test('danmaku heat colors use fixed like thresholds', async () => {
+  const state = client(async url => url.startsWith('/api/danmaku/')
+    ? response({ success: true, items: [{ time: 0, text: 'a', likes: 10 }, { time: 0, text: 'b', likes: 100 }, { time: 0, text: 'c', likes: 500 }] })
+    : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }] }));
+  await state.openTheater({ series_id: '123456' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(new Set([10, 100, 500].map(likes => state.danmakuColor({ likes }))).size, 3);
+});
+
+test('danmaku engine receives episode comments and is replaced when switching episodes', async () => {
+  const instances = [];
+  class FakeDanmaku {
+    constructor(options) { this.options = options; instances.push(this); }
+    destroy() { this.destroyed = true; }
+    resize() {}
+  }
+  const state = client(async url => url.startsWith('/api/danmaku/')
+    ? response({ success: true, items: [{ time: 2, text: url.includes('111111') ? 'first' : 'second', likes: 0 }] })
+    : response({ series_id: '123456', episodes: [{ vid: '111111', vid_index: 1 }, { vid: '222222', vid_index: 2 }] }),
+  { Danmaku: FakeDanmaku });
+  state.videoEl.value = { pause() {}, play() { return Promise.resolve(); } };
+  state.danmakuLayer.value = { offsetWidth: 800, offsetHeight: 96 };
+  await state.openTheater({ series_id: '123456' });
+  await new Promise(resolve => setImmediate(resolve));
+  const first = instances.at(-1);
+  assert.equal(first.options.comments[0].time, 2);
+  assert.equal(first.options.speed, 80);
+  state.switchEpisode({ vid_index: 2 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(first.destroyed, true);
+  assert.notEqual(instances.at(-1), first);
+  assert.equal(instances.at(-1).options.comments.length, 1);
+});
+
+test('search history selection searches again and supports removal', async () => {
+  const calls = [];
+  let stored = [];
+  const state = client(async (url, options) => {
+    calls.push(url);
+    if (url === '/api/search-history' && options?.method === 'POST') {
+      const { action, keyword } = JSON.parse(options.body);
+      stored = action === 'clear' ? [] : action === 'add' ? [keyword, ...stored.filter(x => x !== keyword)].slice(0, 10) : stored.filter(x => x !== keyword);
+      return response(stored);
+    }
+    return response({ results: [], hasMore: false });
+  });
+  state.searchKeyword.value = '  月亮  ';
+  await state.handleSearch();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.searchHistory.value[0], '月亮');
+  state.selectSearchHistory('月亮');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.filter(url => url.startsWith('/api/search?keyword=')).length, 2);
+  assert.equal(state.showSearchHistory.value, false);
+  state.updateSearchHistory('remove', '月亮');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.searchHistory.value.length, 0);
+  assert.equal(stored.length, 0);
+});
+
+test('search history controls retain focus in theater without changing player controls', () => {
+  const listeners = {};
+  let playerFocuses = 0;
+  let blurs = 0;
+  const player = { focus() { playerFocuses++; } };
+  const doc = {
+    documentElement: { classList: { add() {} } },
+    addEventListener(name, fn) { listeners[name] = fn; },
+    querySelector(selector) { return selector === '.player-container' ? player : null; }
+  };
+  const state = client(async () => response([]), {
+    document: doc,
+    window: { addEventListener(name, fn) { listeners[name] = fn; } }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  const button = inSearch => ({
+    tagName: 'BUTTON',
+    blur() { blurs++; },
+    closest(selector) { return selector === '.search-box' ? (inSearch ? this : null) : selector === 'button' ? this : null; }
+  });
+  const historyButton = button(true);
+  for (const name of ['pointerdown', 'focusin', 'click']) listeners[name]({ target: historyButton });
+  assert.equal(blurs, 0);
+  assert.equal(playerFocuses, 0);
+
+  const playerButton = button(false);
+  for (const name of ['pointerdown', 'focusin', 'click']) listeners[name]({ target: playerButton });
+  assert.equal(blurs, 3);
+  assert.equal(playerFocuses, 2);
+});
+
+test('late preference loading preserves changes made by the user', async () => {
+  let finishPreferences;
+  const updates = [];
+  const state = client((url, options) => {
+    if (url === '/api/preferences' && !options) return new Promise(resolve => { finishPreferences = resolve; });
+    if (url === '/api/preferences') { updates.push(JSON.parse(options.body)); return Promise.resolve(response({})); }
+    return Promise.resolve(response(url === '/api/search-history' ? [] : { results: [] }));
+  }, { document: { documentElement: { classList: { add() {} } }, addEventListener() {}, querySelector() { return null; } } });
+  state.mountForTest();
+  state.selectSpeed('2.0');
+  finishPreferences(response({ playbackRate: '0.75', volume: 0.5, danmakuRows: 5 }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(state.playbackRate.value, '2.0');
+  assert.equal(state.volume.value, 0.5);
+  assert.equal(state.danmakuRows.value, 5);
+  assert.equal(updates[0].playbackRate, '2.0');
+});
+
+test('prefetch is requested near the end using remaining playback time', async () => {
+  const calls = [];
+  const state = client(async (url, options) => {
+    calls.push([url, options]);
+    if (url.startsWith('/api/series/')) return response({ series_id: '123', episodes: [{ vid: '111', vid_index: 1 }, { vid: '222', vid_index: 2 }] });
+    return response({ success: true, items: [] });
+  });
+  await state.openTheater({ series_id: '123' });
+  state.videoEl.value = { currentTime: 100, playbackRate: 2, buffered: { length: 0 } };
+  state.duration.value = 200;
+  state.isPlaying.value = true;
+  state.onTimeUpdate();
+  assert.equal(calls.filter(([url]) => url === '/api/prefetch/222').length, 0);
+  state.videoEl.value.currentTime = 112;
+  state.onTimeUpdate(); state.onTimeUpdate();
+  assert.equal(calls.filter(([url, options]) => url === '/api/prefetch/222' && options.method === 'POST').length, 1);
+});
+
+test('danmaku settings close on outside pointer interactions but remain open inside', () => {
+  const listeners = {};
+  const state = client(async () => response([]), {
+    document: { documentElement: { classList: { add() {} } }, addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener() {} },
+    window: { addEventListener() {}, removeEventListener() {} }
+  });
+  state.mountForTest();
+  state.viewMode.value = 'theater';
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'range', closest: selector => selector === '.danmaku-control' ? {} : null } });
+  assert.equal(state.showDanmakuSettings.value, true);
+  listeners.pointerdown({ target: { tagName: 'INPUT', type: 'text', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+  state.showDanmakuSettings.value = true;
+  listeners.pointerdown({ target: { tagName: 'BUTTON', closest: () => null } });
+  assert.equal(state.showDanmakuSettings.value, false);
+});
+
+test('currentStreamUrl includes next_vid and next_vids from upcoming episodes', async () => {
+  const state = client(async () => response({}));
+  state.activeEpisodes.value = [
+    { vid: '101', vid_index: 1 },
+    { vid: '102', vid_index: 2 },
+    { vid: '103', vid_index: 3 },
+    { vid: '104', vid_index: 4 }
+  ];
+  state.activeEpisodeIndex.value = 1;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102&next_vids=102%2C103');
+
+  state.activeEpisodeIndex.value = 3;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/103?next_vid=104');
+
+  state.activeEpisodeIndex.value = 4;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/104');
+});
+
+test('retryCurrentEpisode increments streamRefreshTick and attaches refresh=1, switchEpisode resets it', async () => {
+  const state = client(async () => response({}));
+  state.activeEpisodes.value = [
+    { vid: '101', vid_index: 1 },
+    { vid: '102', vid_index: 2 }
+  ];
+  state.activeEpisodeIndex.value = 1;
+  assert.equal(state.currentStreamUrl.value, '/api/stream/101?next_vid=102');
+
+  state.retryCurrentEpisode();
+  assert.match(state.currentStreamUrl.value, /refresh=1/);
+
+  state.switchEpisode(state.activeEpisodes.value[1]);
+  assert.equal(state.currentStreamUrl.value, '/api/stream/102');
+  assert.ok(!state.currentStreamUrl.value.includes('refresh=1'));
+});
+
+test('video error handler provides specific guidance for MediaError code 2 stream read failures', () => {
+  const state = client(async () => response({}));
+  state.videoEl.value = {
+    error: {
+      code: 2,
+      message: 'MEDIA_ELEMENT_ERROR: Format error'
+    }
+  };
+  state.onVideoError();
+  assert.equal(state.videoErrorMessage.value, '视频流读取中断（网络或取流异常）；请点击“重试本集”或切换分集');
+});
