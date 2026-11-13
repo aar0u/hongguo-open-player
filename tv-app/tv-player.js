@@ -54,12 +54,36 @@
     + 'html:not(.np-fs-on) .player-container:focus{outline:2px solid #ff3355!important;outline-offset:-2px!important}'
     + '#tv-menu button{display:block;width:100%;text-align:left;font-size:21px;padding:11px 20px;margin:4px 0;'
     + 'color:#eee;background:#1d2230;border:2px solid transparent;border-radius:10px}'
-    + '#tv-menu button:focus{outline:none!important;background:#515968!important}';
+    + '#tv-menu button:focus{outline:none!important;background:#515968!important}'
+    + '.video-error-overlay .retry-btn:focus{outline:3px solid #fff!important;outline-offset:3px!important}';
   document.head.appendChild(css);
 
   // ---- Menu key panel: reaches controls the arrow keys cannot (they seek and switch episodes) ----
   // Areas the user enters from the Menu panel and navigates with the arrow keys.
-  var FOCUS_ZONES = '#tv-menu, #episode-sidebar, .app-header, .player-controls';
+  var FOCUS_ZONES = '#tv-menu, #episode-sidebar, .app-header, .player-controls, .video-error-overlay';
+
+  function retryButton() {
+    return document.querySelector('.video-error-overlay .retry-btn');
+  }
+
+  var lastRetry = null;
+  new MutationObserver(function () {
+    var retry = retryButton();
+    if (retry && retry !== lastRetry) {
+      var menu = document.getElementById('tv-menu');
+      if (menu) menu.remove();
+      retry.focus();
+    }
+    lastRetry = retry;
+  }).observe(document.body, { childList: true, subtree: true });
+
+  document.addEventListener('focusin', function (e) {
+    var retry = retryButton();
+    if (retry && e.target !== retry) {
+      e.stopImmediatePropagation();
+      retry.focus();
+    }
+  }, true);
 
   // The page calls .player-container.focus() on every play, click and episode change. Ignore that while the
   // focus is in one of those areas; leaving them (Back) blurs the element first, so focus() works again.
@@ -166,6 +190,7 @@
   }
 
   window.__tvMenu = function () {
+    if (retryButton()) return true;
     if (menuClose()) return true;
     var m = document.createElement('div');
     m.id = 'tv-menu';
@@ -275,6 +300,14 @@
   window.addEventListener('keydown', function (e) {
     var menu = document.getElementById('tv-menu');
     var a = document.activeElement;
+    var retry = retryButton();
+    if (retry && (e.key === 'Enter' || e.key === ' ' || e.key.indexOf('Arrow') === 0)) {
+      if (a !== retry) retry.focus();
+      if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) retry.click();
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (!menu && !document.fullscreenElement && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       var brand = document.querySelector('.app-header .brand');
       var tabs = Array.prototype.slice.call(document.querySelectorAll('.app-header .nav-item'));
