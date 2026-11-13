@@ -446,6 +446,7 @@
       if (event === 'ready') {
         st.d = a / 1000;
         st.ready = true;
+        st.err = null;
         fire(v, 'loadedmetadata');
         fire(v, 'loadeddata');
         fire(v, 'canplay');

@@ -17,6 +17,26 @@ function client(fetch, overrides = {}) {
 }
 const response = data => ({ ok: true, json: async () => data });
 
+test('playback recovery clears errors and ignores a late error probe', async () => {
+  let finishJson;
+  const state = client(async url => {
+    if (url.startsWith('/api/stream/')) return { ok: false, json: () => new Promise(resolve => { finishJson = resolve; }) };
+    return response({});
+  });
+  state.activeSeries.value = { series_id: '1' };
+  state.activeEpisodes.value = [{ vid: '123', vid_index: 1 }];
+  state.activeEpisodeIndex.value = 1;
+  const video = { error: { code: 4, message: 'failed' }, pause() {}, play: async () => {} };
+  state.videoEl.value = video;
+  const pending = state.onVideoError({ target: video });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(state.videoErrorMessage.value, /视频源加载/);
+  state.onCanPlay({ target: video });
+  finishJson({ error: '旧错误' });
+  await pending;
+  assert.equal(state.videoErrorMessage.value, '');
+});
+
 test('late catalog responses cannot replace the active tab; search pagination keeps keyword', async () => {
   const requests = [];
   const state = client(url => new Promise(resolve => requests.push({ url, resolve })));

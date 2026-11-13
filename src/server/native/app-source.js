@@ -381,7 +381,7 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
     if (!inline) {
         const fallback = parseFallback(model.fallback_api);
         if (!fallback) throw Object.assign(new Error('App 接口未返回本集片源地址'), { code: 'MISSING_MODEL' });
-        const outer = await requestJson(fallback, { headers: { 'User-Agent': VIDEO_UA } }, deadline, signal);
+        const outer = await (module.exports.requestJson || requestJson)(fallback, { headers: { 'User-Agent': VIDEO_UA } }, deadline, signal);
         if ([outer, outer.video_info].some(value => Number(value?.Code || value?.code || 0) !== 0)) {
             throw Object.assign(new Error('App 接口暂未提供本集播放信息'), { code: 'BUSINESS_REJECTED' });
         }
@@ -404,6 +404,11 @@ async function parseEntryPlayInfo(vid, entry, requestedQuality, allowLowerQualit
         const aPixels = Math.min(a.width, a.height), bPixels = Math.min(b.width, b.height);
         return (aMeets ? aPixels - bPixels : bPixels - aPixels) || a.codecRank - b.codecRank;
     });
+    if (!rows.length && inline && model.fallback_api) {
+        const fallback = new URL(checkedUrl(parseFallback(model.fallback_api), ['fqnovel.com', 'snssdk.com']));
+        fallback.searchParams.set('codec_type', '3');
+        return parseEntryPlayInfo(vid, { video_model: { fallback_api: fallback.href } }, requestedQuality, allowLowerQuality, deadline, signal);
+    }
     if (!rows.length) throw new Error(requestedQuality === 'auto' || allowLowerQuality
         ? '本集暂未提供兼容的 H.264/HEVC 片源'
         : `本集暂无尺寸可确认且满足 ${requestedQuality} 的 H.264/HEVC 片源，未降级`);

@@ -24,6 +24,37 @@ function mockEntry(vid) {
   };
 }
 
+test('requests an HEVC fallback when inline renditions use an unsupported codec', async () => {
+  const originalRequest = appSource.requestJson;
+  appSource.clearEntryCache();
+  const calls = [];
+  appSource.requestJson = async url => {
+    if (url.includes('register')) return { code: 0, device_id_str: '999', install_id_str: '888' };
+    calls.push(url);
+    if (url.includes('/fallback')) {
+      const parsed = new URL(url);
+      assert.equal(parsed.searchParams.get('codec_type'), '3');
+      assert.equal(parsed.searchParams.get('token'), 'unchanged');
+      return { video_info: { data: { video_list: { hd: {
+        codec_type: 'bytevc1', main_url: 'https://qznovelvod.com/hevc.mp4', definition: '720p'
+      } } } } };
+    }
+    return { code: 0, data: { '30001': { video_model: JSON.stringify({
+      fallback_api: 'https://video.snssdk.com/fallback?token=unchanged&codec_type=2',
+      video_list: [{ codec_type: 'bytevc2', main_url: 'https://qznovelvod.com/bvc2.mp4' }]
+    }) } } };
+  };
+  try {
+    const play = await appSource.fetchAppPlayUrl('30001');
+    assert.equal(play.codec, 'hevc');
+    assert.equal(play.url, 'https://qznovelvod.com/hevc.mp4');
+    assert.equal(calls.length, 2);
+  } finally {
+    appSource.requestJson = originalRequest;
+    appSource.clearEntryCache();
+  }
+});
+
 test('fetchAppPlayUrl batches nextVids and caches returned models in entryCache', async () => {
   const originalRequest = appSource.requestJson;
   appSource.clearEntryCache();

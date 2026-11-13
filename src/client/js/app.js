@@ -822,8 +822,12 @@ createApp({
       resetControlsTimer();
     }
 
+    let videoErrorGeneration = 0;
+
     function onCanPlay(event) {
       if (event && event.target !== videoEl.value) return;
+      videoErrorGeneration++;
+      videoErrorMessage.value = '';
       isBuffering.value = false;
     }
 
@@ -882,6 +886,7 @@ createApp({
       console.error('[Player] 视频播放器报错:', e);
       isBuffering.value = false;
       if (e?.target && e.target !== videoEl.value) return;
+      const errorGeneration = ++videoErrorGeneration;
       const code = videoEl.value?.error?.code;
       const message = videoEl.value?.error?.message || '';
       reportClientLog('ERROR', `播放器解码/渲染报错: code=${code}, message=${message}`);
@@ -891,14 +896,18 @@ createApp({
         videoErrorMessage.value = '视频源加载或格式异常；请检查网络/代理设置，或重试切换分集';
         const streamUrl = currentStreamUrl.value;
         const currentEpIndex = activeEpisodeIndex.value;
+        const currentVideo = videoEl.value;
+        const isCurrentError = () => errorGeneration === videoErrorGeneration &&
+          activeEpisodeIndex.value === currentEpIndex && currentStreamUrl.value === streamUrl && videoEl.value === currentVideo;
         if (streamUrl) {
           try {
             const probeRes = await fetch(streamUrl, {
               method: 'GET',
               headers: { Range: 'bytes=0-0' }
             });
-            if (!probeRes.ok && activeEpisodeIndex.value === currentEpIndex) {
+            if (!probeRes.ok && isCurrentError()) {
               const errData = await probeRes.json().catch(() => null);
+              if (!isCurrentError()) return;
               if (errData?.code === 'DEVICE_REGISTRATION_FAILED' || /匿名播放设备注册失败|ERR_NETWORK/i.test(errData?.error || '')) {
                 videoErrorMessage.value = '播放设备注册受阻（ERR_NETWORK）；请检查网络连接、代理软件（Clash/去广告规则）或 DNS 设置';
                 reportClientLog('WARN', '播放器源探测提示: 设备注册受阻（ERR_NETWORK），已展示网络/代理排查指引');
@@ -909,7 +918,7 @@ createApp({
               }
             }
           } catch (_) {
-            if (activeEpisodeIndex.value === currentEpIndex && typeof navigator !== 'undefined' && navigator.onLine === false) {
+            if (isCurrentError() && typeof navigator !== 'undefined' && navigator.onLine === false) {
               videoErrorMessage.value = '网络连接已断开，请检查网络设置后重试';
             }
           }
@@ -922,6 +931,7 @@ createApp({
     }
 
     function retryCurrentEpisode() {
+      videoErrorGeneration++;
       videoErrorMessage.value = '';
       streamRefreshTick.value++;
       if (videoEl.value) {
