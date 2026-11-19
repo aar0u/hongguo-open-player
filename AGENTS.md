@@ -119,5 +119,10 @@ per-build debug key) needs `adb uninstall org.hongguo.tv` once, after which upda
 ## Open items
 
 - The fullscreen fix for the newer WebView (commit `f8a13b3`) is not verified on that TV.
+- The rebase onto upstream (2026-11-19) was tested only on the Chrome 66 TV. The HEVC probe shims in `tv-player.js`
+  (`canPlayType`, `mediaCapabilities`, `videoWidth`/`videoHeight`) are not verified on the newer WebView.
+- The control bar's danmaku, speed and resolution buttons cannot be reached with the D-pad (`barControls()` only
+  picks `.ctrl-btn`). Danmaku display over the native video is untested.
+- The header menu has desktop items (open log folder) that do nothing useful on a TV.
 - ExoPlayer logs a HEVC level warning (`hvc1.1.6.L186`); playback works.
 - No seek or volume control by arrow keys in windowed mode (use fullscreen Left/Right and the system volume keys).
