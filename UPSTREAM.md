@@ -67,6 +67,10 @@ device test were not run: the Android toolchain and a connected TV were unavaila
 | `79ca8f3` #103 | Partly taken | Session cookie jar and request diagnostics (`device-session.js`, `playback-device.js`). Left out the `/api/device` endpoints, danmaku and version routes in `index.js`, which this fork does not have |
 | `f57df9c` #100, #104 | Skip for now | Multi-cluster fallback and HEVC fallback are tangled with ByteVC2 and client changes (22 conflict hunks in 8 files). Revisit together with ByteVC2 |
 
+Upstream PR #107 (`a3e6269`, not merged upstream yet) was taken on top: it signs the playback request with the v5 mobile
+scheme. Since the server changed its check, v3 signatures got an empty HTTP 200 (upstream #105, #102). Check whether
+upstream merges it, and drop this note once it does. Live check on 2026-11-19: `/api/play` returned a stream URL.
+
 ## Open
 
 - Revisit #30 (intro preview) when there is time to make the popup D-pad friendly.
