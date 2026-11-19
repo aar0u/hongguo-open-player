@@ -340,6 +340,11 @@
         target = e.key === 'ArrowRight' ? (tabs[tabIndex + 1] || search) : (tabs[tabIndex - 1] || brand);
       } else if (a === search && e.key === 'ArrowLeft' && a.selectionStart === 0 && a.selectionEnd === 0) {
         target = tabs[tabs.length - 1];
+      } else if (a === search && e.key === 'ArrowRight' && a.selectionStart === a.value.length) {
+        // The text field keeps Right for the caret; at the end of the text it leads to the header menu button.
+        target = document.querySelector('.app-header .header-menu-btn');
+      } else if (a && a.classList.contains('header-menu-btn') && e.key === 'ArrowLeft') {
+        target = search;
       }
       if (target) {
         focusHeaderItem(target);
