@@ -4,6 +4,24 @@
   var NP = window.NP;
   if (!NP) return;
 
+  // The page probes canPlayType for HEVC and asks the server for a non-HEVC source when the probe is empty.
+  // Chrome 66 says no, but the native player decodes HEVC, so answer for it.
+  var nativeCanPlay = HTMLMediaElement.prototype.canPlayType;
+  HTMLMediaElement.prototype.canPlayType = function (type) {
+    return /hvc1|hev1/i.test(String(type)) ? 'probably' : nativeCanPlay.call(this, type);
+  };
+
+  var mc = navigator.mediaCapabilities;
+  if (mc && mc.decodingInfo) {
+    var nativeDecodingInfo = mc.decodingInfo;
+    mc.decodingInfo = function (cfg) {
+      var type = cfg && cfg.video && cfg.video.contentType;
+      return /hvc1|hev1/i.test(String(type))
+        ? Promise.resolve({ supported: true, smooth: true, powerEfficient: true })
+        : nativeDecodingInfo.call(mc, cfg);
+    };
+  }
+
   var cur = null;
   var lastRect = '';
   var html = document.documentElement;
@@ -447,6 +465,10 @@
       NP.seek(Math.round(st.t * 1000));
     });
     def('duration', function () { return st.d; });
+    // The page treats 0x0 with a known duration as "cannot decode HEVC" and reloads a lower-quality source.
+    // The real size is only known to the native player, so report a portrait HD frame once metadata is in.
+    def('videoWidth', function () { return st.ready ? 1080 : 0; });
+    def('videoHeight', function () { return st.ready ? 1920 : 0; });
     def('paused', function () { return st.paused; });
     def('ended', function () { return st.ended; });
     def('readyState', function () { return st.ready ? 4 : 0; });
