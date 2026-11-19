@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// A fixed debug signing key, kept in the repo as base64 text. It is not a secret: it only makes CI and local builds
+// carry the same signature, so `adb install -r` can update an installed app in place and keep its settings.
+def debugKeystore = layout.buildDirectory.file('debug.p12').get().asFile
+debugKeystore.parentFile.mkdirs()
+debugKeystore.bytes = Base64.mimeDecoder.decode(file('../debug.keystore.b64').text)
+
+android {
+    namespace 'org.hongguo.tv'
+    compileSdk 34
+
+    signingConfigs {
+        debug {
+            storeFile debugKeystore
+            storeType 'pkcs12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    defaultConfig {
+        applicationId 'org.hongguo.tv'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        // Default backend address; override at build time with -PserverUrl=... or at runtime with the Menu key.
+        buildConfigField 'String', 'SERVER_URL', "\"${project.findProperty('serverUrl') ?: 'http://192.168.31.217:8899/'}\""
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // The TV's WebView is Chrome 66 and cannot decode HEVC; Media3 uses the TV's hardware decoder instead.
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+}

@@ -8,6 +8,9 @@ data/*.bak
 .DS_Store
 *.log
 *.apk
+tv-app/.gradle/
+tv-app/app/src/main/assets/
+tv-app/**/build/
 
 # 本地审计与审查记录
 /reviews/
