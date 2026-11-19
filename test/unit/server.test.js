@@ -117,6 +117,33 @@ test('servers on different ports isolate cookies via port-specific cookie names'
   assert.equal(res1.status, 200);
 });
 
+test('system log diagnostics endpoints return 200 and open paths', async t => {
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  const Cookie = home.headers.get('set-cookie').split(';')[0];
+  const apiFetch = (url, opts = {}) => fetch(url, { ...opts, headers: { Cookie, ...opts.headers } });
+
+  const getLogsRes = await apiFetch(`${base}/api/system/logs`);
+  assert.equal(getLogsRes.status, 200);
+  const logsData = await getLogsRes.json();
+  assert.ok(logsData.logFile);
+  assert.ok(logsData.logDir);
+
+  const openDirRes = await apiFetch(`${base}/api/system/open-log-dir`, { method: 'POST' });
+  assert.equal(openDirRes.status, 200);
+  const openDirData = await openDirRes.json();
+  assert.equal(openDirData.success, true);
+  assert.ok(openDirData.logDir);
+
+  const openFileRes = await apiFetch(`${base}/api/system/open-log-file`, { method: 'POST' });
+  assert.equal(openFileRes.status, 200);
+  const openFileData = await openFileRes.json();
+  assert.equal(openFileData.success, true);
+  assert.ok(openFileData.logFile);
+});
+
 test('all GitHub Actions workflow files are valid YAML', async () => {
   const fs = require('node:fs');
   const path = require('node:path');
@@ -155,4 +182,50 @@ test('near-end prefetch endpoint requires a session and validates the episode', 
     ['123', 'auto', true, 45000, []],
     ['124', 'auto', true, 45000, ['125', '126']]
   ]);
+});
+
+test('device API returns current device and supports manual reset to rotate device ID', async t => {
+  const appSource = require('../../src/server/native/app-source');
+  const originalRequest = appSource.requestJson;
+  let registerSeq = 1;
+  appSource.requestJson = async (url) => {
+    if (url.includes('device_register')) {
+      const id = String(800000000000000 + registerSeq++);
+      const res = { device_id_str: id, install_id_str: id, code: 0 };
+      Object.defineProperty(res, '_headers', {
+        value: { 'set-cookie': [`install_id=${id}; Path=/`] },
+        enumerable: false
+      });
+      return res;
+    }
+    return { code: 0 };
+  };
+  t.after(() => { appSource.requestJson = originalRequest; });
+
+  const { server, port } = await startServer(0);
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${port}`;
+  const home = await fetch(base);
+  const cookie = home.headers.get('set-cookie').split(';')[0];
+  const options = { headers: { Cookie: cookie } };
+
+  // 1. GET /api/device
+  const getRes = await fetch(`${base}/api/device`, options);
+  assert.equal(getRes.status, 200);
+  const initialDevice = await getRes.json();
+  assert.equal(initialDevice.success, true);
+  assert.ok(/^\d{10,30}$/.test(initialDevice.device_id));
+
+  // 2. POST /api/device/reset
+  const resetRes = await fetch(`${base}/api/device/reset`, { method: 'POST', ...options });
+  assert.equal(resetRes.status, 200);
+  const resetData = await resetRes.json();
+  assert.equal(resetData.success, true);
+  assert.ok(/^\d{10,30}$/.test(resetData.device.device_id));
+  assert.notEqual(resetData.device.device_id, initialDevice.device_id);
+
+  // 3. Subsequent GET /api/device should return the new device
+  const afterRes = await fetch(`${base}/api/device`, options);
+  const afterDevice = await afterRes.json();
+  assert.equal(afterDevice.device_id, resetData.device.device_id);
 });

@@ -1,10 +1,17 @@
 node_modules/
 dist/
 dist-electron/
+build/bytevc2/
 data/*.json
+data/*.bak
+*.bak
 .DS_Store
 *.log
 *.apk
 tv-app/.gradle/
 tv-app/app/src/main/assets/
 tv-app/**/build/
+
+# 本地审计与审查记录
+/reviews/
+/docs/review-implementation.md

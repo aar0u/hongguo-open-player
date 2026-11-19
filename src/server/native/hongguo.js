@@ -256,6 +256,25 @@ function parseEpisodeListHtml(html, seriesId) {
     web_available: webAccessibleEpisodes === null ? null : i < webAccessibleEpisodes,
   }));
 
+  const intro = typeof detail.series_intro === 'string' ? detail.series_intro.trim() : '';
+  const tags = Array.isArray(detail.tags) ? detail.tags.map(t => String(t).trim()).filter(Boolean) : [];
+  const episodeLabel = typeof detail.episode_right_text === 'string' ? detail.episode_right_text.trim() : '';
+  const celebrities = Array.isArray(detail.celebrities) ? detail.celebrities
+    .filter(c => c && !c.is_label && (c.nickname || c.name))
+    .map(c => ({
+      actor_id: String(c.celebrity_id || c.actor_id || ''),
+      name: String(c.nickname || c.name || '').trim(),
+      avatar: typeof c.avatar === 'string' ? c.avatar : '',
+      role: String(c.sub_title || c.role || '').trim()
+    })) : [];
+  const socialInfo = data?.seriesSocialInfo ? {
+    rating: Number(data.seriesSocialInfo.rating) || null,
+    rating_count: data.seriesSocialInfo.rating_count ? String(data.seriesSocialInfo.rating_count) : '',
+    hot_text: data.seriesSocialInfo.hot_score_data?.text || '',
+    like_count: data.seriesSocialInfo.series_like_count ? String(data.seriesSocialInfo.series_like_count) : '',
+    favorite_count: data.seriesSocialInfo.series_favorite_count ? String(data.seriesSocialInfo.series_favorite_count) : ''
+  } : null;
+
   return {
     series_id: String(seriesId),
     series_title: seriesTitle,
@@ -263,6 +282,11 @@ function parseEpisodeListHtml(html, seriesId) {
     total: episodes.length,
     web_accessible_episodes: webAccessibleEpisodes,
     episodes,
+    intro,
+    tags,
+    episode_label: episodeLabel,
+    social_info: socialInfo,
+    celebrities,
     source: 'web', // 标记来源，便于排查
   };
 }
@@ -1079,10 +1103,14 @@ function mp4TrackInfo(data, top, total) {
     }
 
     if (si !== n) throw new Error('MP4 sample-to-chunk count mismatch');
-    trackInfo.push({ sizes, offs: sampleOffs, ivs, stco });
+    trackInfo.push({ sizes, offs: sampleOffs, ivs, stco, encrypted });
   }
 
   return trackInfo;
+}
+
+function hasSampleEncryption(boxes) {
+  return boxes.some(box => box.typ === 'senc' || (box.children && hasSampleEncryption(box.children)));
 }
 
 /**
@@ -1111,6 +1139,9 @@ function decryptMp4Buffer(input, key) {
   }
 
   const trackInfo = mp4TrackInfo(data, top, total);
+  if ((hasSampleEncryption(top) || trackInfo.some(track => track.encrypted || track.ivs.length)) && (!Buffer.isBuffer(key) || key.length !== 16)) {
+    throw new Error('Invalid CENC key');
+  }
 
   for (const ti of trackInfo) {
     for (let i = 0; i < ti.offs.length; i++) {
@@ -1171,7 +1202,15 @@ function createMp4StreamingPlan(metadata, boxes, total) {
     .sort((a, b) => a.offset - b.offset);
   if (samples.length > 100000) throw new Error('MP4 sample count exceeds streaming budget');
   for (const sample of samples) if (!Number.isSafeInteger(sample.offset) || sample.offset + sample.size > total) throw new Error('Invalid encrypted MP4 sample');
-  return { size, segments, samples };
+  return { size, segments, samples, encrypted: hasSampleEncryption(localBoxes) || tracks.some(track => track.encrypted || track.ivs.length) };
+}
+
+function assertUnencryptedMp4(data) {
+  const boxes = parseBoxes(data, 0, data.length);
+  if (!boxes.some(box => box.typ === 'moov') || !boxes.some(box => box.typ === 'mdat')) throw new Error('MP4 requires moov and mdat');
+  if (hasSampleEncryption(boxes) || mp4TrackInfo(data, boxes, data.length).some(track => track.encrypted || track.ivs.length)) {
+    throw new Error('Invalid CENC key');
+  }
 }
 
 /**
@@ -1193,6 +1232,7 @@ module.exports = {
   decryptMp4File,
   decryptMp4Buffer,
   createMp4StreamingPlan,
+  assertUnencryptedMp4,
   VIDEO_REFERER,
   UA,
   WEB_UA,

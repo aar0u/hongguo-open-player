@@ -36,6 +36,25 @@ app.use((req, res, next) => {
   }
   next();
 });
+// 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断，置于最前以确保 401/403 等均被完整记录)
+app.use((req, res, next) => {
+  if (req.path.toLowerCase().startsWith('/api/')) {
+    const t0 = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - t0;
+      const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
+      if (res.statusCode >= 500) {
+        logger.error('API', msg);
+      } else if (res.statusCode >= 400 && res.getHeader('X-Stream-Mode') !== 'bytevc2-progressive') {
+        logger.warn('API', msg);
+      } else {
+        logger.info('API', msg);
+      }
+    });
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   const normalizedPath = req.path.toLowerCase();
   const port = req.socket?.localPort;
@@ -56,25 +75,6 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '64kb' }));
 
-// 核心 API 请求访问与耗时日志中间件 (用于日常排错与运行诊断)
-app.use((req, res, next) => {
-  if (req.path.toLowerCase().startsWith('/api/')) {
-    const t0 = Date.now();
-    res.on('finish', () => {
-      const duration = Date.now() - t0;
-      const msg = `${req.method} ${req.originalUrl || req.url} -> ${res.statusCode} (${duration}ms)`;
-      if (res.statusCode >= 500) {
-        logger.error('API', msg);
-      } else if (res.statusCode >= 400) {
-        logger.warn('API', msg);
-      } else {
-        logger.info('API', msg);
-      }
-    });
-  }
-  next();
-});
-
 // 静态前端资源目录
 const clientDir = path.join(__dirname, '../client');
 app.use(express.static(clientDir));
@@ -82,6 +82,7 @@ app.use(express.static(clientDir));
 function sendApiError(res, error) {
   const status = error.status >= 400 && error.status < 600 ? error.status : 500;
   const messages = {
+    EMPTY_RESPONSE: '上游接口返回空响应，请尝试点击右上角菜单中的“生成新的设备ID”后重试',
     DEVICE_REGISTRATION_FAILED: '播放设备注册暂时失败，请稍后重试',
     ETIMEDOUT: '上游请求超时，请稍后重试',
     SECURITY_BLOCKED: '视频源地址未通过安全检查',
@@ -92,6 +93,67 @@ function sendApiError(res, error) {
   logger.error('API', `${error.code || 'REQUEST_FAILED'} - ${error.message}`);
   res.status(status).json({ error: status === 400 ? error.message : messages[error.code] || '操作失败，请稍后重试' });
 }
+
+// 版本来自打包时写入的 package.json，开发模式同样使用该文件。
+app.get('/api/system/version', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: require('../../package.json').version });
+});
+
+/**
+ * 获取当前活跃匿名设备信息
+ */
+app.get('/api/device', async (_req, res) => {
+  try {
+    const { getPlaybackDevice } = require('./native/playback-device');
+    const { requestJson } = require('./native/app-source');
+    const device = await getPlaybackDevice(requestJson);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      device_id: device.device_id,
+      iid: device.iid,
+      created_at: device.created_at,
+      session: getPlaybackDevice.diagnostics(device, require('./native/device-session').PLAYBACK_URL)
+    });
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+/**
+ * 用户主动生成并切换新设备
+ */
+app.post('/api/device/reset', async (_req, res) => {
+  try {
+    const { getPlaybackDevice } = require('./native/playback-device');
+    const { requestJson } = require('./native/app-source');
+    const danmakuService = require('./native/danmaku');
+    logger.info('Device', '收到用户主动更换设备指令，开始注册全新的独立匿名设备...');
+    const newDevice = await getPlaybackDevice.rotateDevice(requestJson);
+    danmakuService.resetDanmakuCache();
+    logger.info('Device', `新设备生成成功: device_id=${newDevice.device_id}, iid=${newDevice.iid}`);
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      device: {
+        device_id: newDevice.device_id,
+        iid: newDevice.iid,
+        created_at: newDevice.created_at
+      }
+    });
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
+app.get('/api/danmaku/:seriesId/:vid', async (req, res) => {
+  const { seriesId, vid } = req.params;
+  if (!/^\d{6,30}$/.test(seriesId) || !/^\d{6,30}$/.test(vid)) return res.status(400).json({ error: '剧集编号无效' });
+  const result = await require('./native/danmaku').fetchDanmaku({ seriesId, vid, fresh: req.query.fresh === '1' });
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
+});
 
 // ================= API 路由 =================
 
@@ -169,7 +231,9 @@ app.post('/api/prefetch/:vid', (req, res) => {
       if (/^\d{1,30}$/.test(clean) && !nextVids.includes(clean)) nextVids.push(clean);
     }
   }
-  streamService.prefetch(vid, 'auto', true, 45000, nextVids);
+  const allowHevc = req.query?.hevc !== '0';
+  if (allowHevc) streamService.prefetch(vid, 'auto', true, 45000, nextVids);
+  else streamService.prefetch(vid, 'auto', true, 45000, nextVids, false);
   res.sendStatus(202);
 });
 
@@ -181,6 +245,21 @@ app.get('/api/stream/:vid', (req, res) => {
 /**
  * 6. 播放进度与历史
  */
+app.get('/api/preferences', (_req, res) => res.json(storeService.getPreferences()));
+app.post('/api/preferences', async (req, res) => {
+  try { res.json(await storeService.updatePreferences(req.body)); }
+  catch (err) { sendApiError(res, err); }
+});
+
+app.get('/api/search-history', (_req, res) => res.json(storeService.getSearchHistory()));
+app.post('/api/search-history', async (req, res) => {
+  try {
+    res.json(await storeService.updateSearchHistory(req.body?.action, req.body?.keyword));
+  } catch (err) {
+    sendApiError(res, err);
+  }
+});
+
 app.get('/api/history', (req, res) => {
   res.json(storeService.getHistory());
 });
@@ -275,6 +354,83 @@ app.get('/api/system/logs', (req, res) => {
     logDir: logger.getLogDir(),
     recent: logger.getRecentLogs(limit)
   });
+});
+
+async function openSystemPath(targetPath, isDirectory = false) {
+  if (process.env.NODE_ENV === 'test' || Boolean(process.env.CI)) {
+    return true;
+  }
+  let opened = false;
+  try {
+    const electron = require('electron');
+    if (electron?.shell?.openPath) {
+      const errMsg = await electron.shell.openPath(targetPath);
+      if (!errMsg) {
+        opened = true;
+      } else {
+        logger.warn('System', `electron.shell.openPath 失败: ${errMsg}，尝试系统命令回退`);
+      }
+    }
+  } catch (_) {}
+
+  if (!opened) {
+    try {
+      const { spawn } = require('node:child_process');
+      let child;
+      if (process.platform === 'win32') {
+        if (isDirectory) {
+          child = spawn('explorer', [targetPath], { detached: true, stdio: 'ignore' });
+        } else {
+          child = spawn('notepad', [targetPath], { detached: true, stdio: 'ignore' });
+        }
+      } else if (process.platform === 'darwin') {
+        child = spawn('open', [targetPath], { detached: true, stdio: 'ignore' });
+      } else {
+        child = spawn('xdg-open', [targetPath], { detached: true, stdio: 'ignore' });
+      }
+      if (child && typeof child.unref === 'function') {
+        child.unref();
+      }
+      opened = true;
+    } catch (err) {
+      logger.error('System', `调用系统命令打开路径失败: ${err.message}`);
+    }
+  }
+  return opened;
+}
+
+app.post('/api/system/open-log-dir', async (req, res) => {
+  try {
+    const fs = require('node:fs');
+    const logDir = logger.getLogDir();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    await openSystemPath(logDir, true);
+    res.json({ success: true, logDir });
+  } catch (err) {
+    logger.error('System', `打开日志目录失败: ${err.message}`);
+    res.status(500).json({ error: '无法打开日志目录' });
+  }
+});
+
+app.post('/api/system/open-log-file', async (req, res) => {
+  try {
+    const fs = require('node:fs');
+    const logFile = logger.getLogFilePath();
+    const logDir = logger.getLogDir();
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    if (!fs.existsSync(logFile)) {
+      fs.writeFileSync(logFile, '', 'utf8');
+    }
+    await openSystemPath(logFile, false);
+    res.json({ success: true, logFile });
+  } catch (err) {
+    logger.error('System', `打开日志文件失败: ${err.message}`);
+    res.status(500).json({ error: '无法打开日志文件' });
+  }
 });
 
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));

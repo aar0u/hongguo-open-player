@@ -2,6 +2,117 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const StreamService = require('../../src/server/services/streamService').constructor;
 
+test('progressive ByteVC2 streams fragments and reuses completed conversions', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  let conversions = 0;
+  const key = '0123456789abcdef0123456789abcdef';
+  const service = new StreamService({ progressiveTranscode: async function* (input, actualKey) {
+    conversions++;
+    assert.equal(input.toString(), 'encrypted');
+    assert.equal(actualKey.toString('hex'), key);
+    yield Buffer.from('first');
+    yield Buffer.from('second');
+  } });
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 46, url: 'https://example.com/video', contentKey: key });
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  const server = http.createServer((req, res) => {
+    req.query = Object.fromEntries(new URL(req.url, 'http://localhost').searchParams);
+    service.handleStream(req, res, '123');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}/`;
+  try {
+    let response = await fetch(`${base}?mse=1`);
+    assert.equal(response.status, 409);
+    assert.deepEqual(await response.json(), { code: 'BYTEVC2_PROGRESSIVE', duration: 46 });
+    response = await fetch(`${base}?mse=stream`);
+    assert.equal(await response.text(), 'firstsecond');
+    response = await fetch(`${base}?mse=1`);
+    assert.equal((await response.json()).duration, 46);
+    response = await fetch(`${base}?mse=stream`);
+    assert.equal(await response.text(), 'firstsecond');
+    assert.equal(conversions, 1);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('disconnecting a progressive stream cancels the active conversion', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  let cancelled;
+  const cancelledPromise = new Promise(resolve => { cancelled = resolve; });
+  const service = new StreamService({ progressiveTranscode: async function* (_input, _key, signal) {
+    try {
+      yield Buffer.from('fragment');
+      if (!signal.aborted) await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    } finally { cancelled(); }
+  } });
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 46, url: 'https://example.com/video', contentKey: null });
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  const server = http.createServer((req, res) => { req.query = { mse: 'stream' }; service.handleStream(req, res, '123'); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const controller = new AbortController();
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/`, { signal: controller.signal });
+    await response.body.getReader().read();
+    controller.abort();
+    await cancelledPromise;
+    assert.equal(service.fragmentCache.size, 0);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+test('ByteVC2 uses buffered transcoding and caches the resulting playable video', async () => {
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  const key = '0123456789abcdef0123456789abcdef';
+  let conversions = 0;
+  const service = new StreamService({ transcode: async (buffer, actualKey, signal) => {
+    conversions++;
+    assert.equal(buffer.toString(), 'encrypted');
+    assert.equal(actualKey.toString('hex'), key);
+    assert.equal(signal.aborted, false);
+    return Buffer.from('playable');
+  } });
+  appSource.fetchAppPlayUrl = async (_vid, options) => {
+    assert.equal(options.allowBytevc2, true);
+    return { codec: 'bytevc2', url: 'https://example.com/video', contentKey: key };
+  };
+  service.downloadFastestMedia = async (_variants, variant) => ({ buffer: Buffer.from('encrypted'), variant });
+  try {
+    const signal = new AbortController().signal;
+    assert.equal(await service.getStreamingPlan('123', 'auto', signal), null);
+    assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
+    assert.equal((await service.getDecryptedBuffer('123', 'auto', { signal })).toString(), 'playable');
+    assert.equal(conversions, 1);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+  }
+});
+
+test('ByteVC2 without a usable duration falls back to buffered playback', async () => {
+  const appSource = require('../../src/server/native/app-source');
+  const original = appSource.fetchAppPlayUrl;
+  const service = new StreamService();
+  appSource.fetchAppPlayUrl = async () => ({ codec: 'bytevc2', duration: 0 });
+  try {
+    assert.equal(await service.getStreamingPlan('123', 'auto', new AbortController().signal, 0, [], true), null);
+  } finally {
+    service.shutdown();
+    appSource.fetchAppPlayUrl = original;
+  }
+});
+
 test('HTTP ranges support suffix/open end and reject malformed or unsafe offsets', async () => {
   const service = new StreamService();
   service.getStreamingPlan = async () => null;
@@ -325,5 +436,60 @@ test('prefetch forwards nextVids to getStreamingPlan and handleStream passes fol
     assert.deepEqual(prefetchCalls[0], ['102', 'auto', true, 0, ['103', '104']]);
   } finally {
     global.setTimeout = originalSetTimeout;
+  }
+});
+
+test('hevc=0 isolates stream plan cache and triggers progressive transcode when fallback returns HEVC', async () => {
+  const http = require('node:http');
+  const appSource = require('../../src/server/native/app-source');
+  const originalFetch = appSource.fetchAppPlayUrl;
+  const service = new StreamService({
+    progressiveTranscode: async function* () {
+      yield Buffer.from('ftypmp42moofmdat');
+    }
+  });
+  service.downloadFastestMedia = async () => ({
+    buffer: Buffer.from('000000186674797069736f6d', 'hex'),
+    variant: { codec: 'hevc', contentKey: null }
+  });
+
+  const calls = [];
+  appSource.fetchAppPlayUrl = async (vid, options) => {
+    calls.push({ vid, allowHevc: options.allowHevc, allowHevcTranscode: options.allowHevcTranscode });
+    return { codec: 'hevc', duration: 60, url: 'https://example.com/hevc.mp4', contentKey: null };
+  };
+
+  try {
+    // Seed a direct HEVC streaming plan under hevc=1
+    service.plans.set('777:auto', {
+      plan: { size: 5, bytes: 5, read: async function* () { yield Buffer.from('12345'); } },
+      expires: Date.now() + 60000
+    });
+
+    const server = http.createServer((req, res) => {
+      const parsed = new URL(req.url, 'http://127.0.0.1');
+      req.query = Object.fromEntries(parsed.searchParams);
+      service.handleStream(req, res, parsed.pathname.split('/').pop());
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}/api/stream/777`;
+
+    try {
+      const probeRes = await fetch(`${base}?mse=1&hevc=0`);
+      assert.equal(probeRes.status, 409);
+      const body = await probeRes.json();
+      assert.equal(body.code, 'BYTEVC2_PROGRESSIVE');
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0], { vid: '777', allowHevc: false, allowHevcTranscode: true });
+
+      const streamRes = await fetch(`${base}?mse=stream&hevc=0`);
+      assert.equal(streamRes.status, 200);
+      assert.equal(Buffer.from(await streamRes.arrayBuffer()).toString(), 'ftypmp42moofmdat');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+      service.shutdown();
+    }
+  } finally {
+    appSource.fetchAppPlayUrl = originalFetch;
   }
 });

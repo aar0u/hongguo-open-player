@@ -30,6 +30,7 @@
     },
     "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "mac": {
+      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
       "artifactName": "${name}-${version}-mac-${arch}.${ext}",
@@ -73,6 +74,7 @@
       }
     },
     "win": {
+      "extraResources": [{ "from": "build/bytevc2/${arch}", "to": "bytevc2" }],
       "target": [
         {
           "target": "nsis",
@@ -110,7 +112,8 @@
     "files": [
       "src/**/*",
       "package.json",
-      "build/icon.ico"
+      "build/icon.ico",
+      "build/icon.png"
     ]
   },
   "repository": {
@@ -129,6 +132,7 @@
   "dependencies": {
     "axios": "^1.21.0",
     "express": "^5.3.0",
+    "tough-cookie": "^6.1.0",
     "vue": "^3.5.44"
   },
   "devDependencies": {

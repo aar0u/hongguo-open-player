@@ -23,6 +23,9 @@ function createWindow() {
 
 async function buildWindow() {
   // 1. 启动本地内嵌 Node Express 引擎
+  if (app.isPackaged === false && !process.env.HONGGUO_BVC2_FFMPEG) {
+    process.env.HONGGUO_BVC2_FFMPEG = path.join(__dirname, '../../build/bytevc2', process.arch, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  }
   process.env.HONGGUO_DATA_DIR = path.join(app.getPath('userData'), 'data');
   process.env.HONGGUO_LOG_DIR = path.join(app.getPath('userData'), 'logs');
   let logger;
@@ -83,6 +86,23 @@ async function buildWindow() {
     try { if (new URL(url).origin === appUrl) return; } catch (_) {}
     event.preventDefault();
   };
+  let recoveryPending = false;
+  window.webContents.on('render-process-gone', async (_event, details) => {
+    if (details.reason === 'clean-exit' || recoveryPending || mainWindow !== window || window.isDestroyed?.()) return;
+    recoveryPending = true;
+    try {
+      const result = await dialog.showMessageBox(window, {
+        type: 'warning', title: '播放器界面已停止', message: '播放器界面意外停止运行',
+        detail: '可以重新加载界面，播放进度将从最近保存的位置恢复。',
+        buttons: ['重新加载', '稍后处理'], defaultId: 0, cancelId: 1, noLink: true
+      });
+      if (result.response === 0 && mainWindow === window && !window.isDestroyed?.() && !window.webContents.isDestroyed?.()) window.webContents.reload();
+    } catch (error) {
+      console.error('Renderer recovery failed:', error);
+    } finally {
+      recoveryPending = false;
+    }
+  });
   window.webContents.on('will-navigate', guardNavigation);
   window.webContents.on('will-redirect', guardNavigation);
   window.on('closed', () => {
@@ -145,6 +165,14 @@ function setupMenu() {
                 label: '关于 红果开源播放器',
                 click: () => showAboutDialog()
               },
+              {
+                label: '生成新的设备 ID',
+                click: () => {
+                  if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.executeJavaScript('window.__app?.resetDevice?.()').catch(console.error);
+                  }
+                }
+              },
               { type: 'separator' },
               { role: 'services', label: '服务' },
               { type: 'separator' },
@@ -205,6 +233,14 @@ function setupMenu() {
         {
           label: '关于 红果开源播放器',
           click: () => showAboutDialog()
+        },
+        {
+          label: '生成新的设备 ID',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.executeJavaScript('window.__app?.resetDevice?.()').catch(console.error);
+            }
+          }
         },
         {
           label: 'GitHub 项目主页',

@@ -5,15 +5,21 @@ const { pipeline } = require('node:stream/promises');
 const rangeMedia = require('./rangeMedia');
 const appSource = require('../native/app-source');
 const { decryptMp4Buffer } = require('../native/hongguo');
+const { transcodeBytevc2, streamBytevc2, supportsHevcDecoder } = require('../native/bytevc2-transcode');
 const { normalizeDownloadQuality } = require('../native/download-quality');
 const { webMediaRequestOptions } = require('../native/web-media-guard');
 const logger = require('./logger');
 
 class StreamService {
-  constructor({ requestOptions = webMediaRequestOptions } = {}) {
+  constructor(options = {}) {
+    const { requestOptions = webMediaRequestOptions, transcode = transcodeBytevc2, progressiveTranscode = streamBytevc2 } = options;
     this.requestOptions = requestOptions;
+    this.transcode = transcode;
+    this.progressiveTranscode = progressiveTranscode;
+    this.hasCustomTranscoder = Boolean(options.transcode || options.progressiveTranscode);
     // 内存 LRU 缓存：vid -> { buffer, size, timestamp }
     this.cache = new Map();
+    this.fragmentCache = new Map();
     this.maxCacheBytes = 128 * 1024 * 1024;
     this.maxCacheCount = 15; // 保持最近播放的 15 集，约 100MB 内存占用
     // 正在下载解密中的 Promise 映射，避免并发 Range 请求重复下载
@@ -209,12 +215,28 @@ class StreamService {
     });
   }
 
+  cacheKey(vid, quality = 'auto', allowHevc = true) {
+    return `${vid}:${quality}${allowHevc ? '' : ':nohevc'}`;
+  }
+
+  canTranscodeHevc() {
+    return this.hasCustomTranscoder || supportsHevcDecoder();
+  }
+
+  needsTranscode(codec, allowHevc = true) {
+    if (codec === 'bytevc2') return true;
+    if (allowHevc) return false;
+    return typeof appSource.isHevcCodec === 'function'
+      ? appSource.isHevcCodec(codec)
+      : ['hevc', 'h265', 'hvc1', 'hev1', 'bytevc1'].includes(String(codec || '').toLowerCase());
+  }
+
   /**
    * 获取或解密得到指定 vid 的明文 MP4 Buffer
    */
-  getDecryptedBuffer(vid, quality = 'auto', { signal, background = false } = {}) {
+  getDecryptedBuffer(vid, quality = 'auto', { signal, background = false, allowHevc = true } = {}) {
     quality = normalizeDownloadQuality(quality);
-    const key = `${vid}:${quality}`;
+    const key = this.cacheKey(vid, quality, allowHevc);
     if (signal?.aborted) return Promise.reject(signal.reason);
     if (this.cache.has(key)) {
       const entry = this.cache.get(key);
@@ -226,7 +248,7 @@ class StreamService {
     if (job?.controller.signal.aborted) { this.inFlight.delete(key); job = null; }
     if (!job) {
       if (this.inFlight.size >= this.maxPending) return Promise.reject(Object.assign(new Error('播放请求过多，请稍后重试'), { status: 503 }));
-      job = { key, vid: String(vid), quality, background, controller: new AbortController(), clients: new Set() };
+      job = { key, vid: String(vid), quality, allowHevc, background, controller: new AbortController(), clients: new Set() };
       job.promise = new Promise((resolve, reject) => { job.resolve = resolve; job.reject = reject; });
       this.inFlight.set(key, job);
       this.queue.push(job);
@@ -262,17 +284,24 @@ class StreamService {
       return;
     }
     this.activeJob = job;
-    this.loadBuffer(job.vid, job.quality, job.controller.signal).then(job.resolve, job.reject).finally(() => {
+    this.loadBuffer(job.vid, job.quality, job.controller.signal, job.allowHevc).then(job.resolve, job.reject).finally(() => {
       if (this.inFlight.get(job.key) === job) this.inFlight.delete(job.key);
       this.activeJob = null;
       this.runNext();
     });
   }
 
-  async loadBuffer(vid, quality, signal) {
+  async loadBuffer(vid, quality, signal, allowHevc = true) {
     const t0 = Date.now();
     logger.info('StreamService', `[Decrypt] 开始全量拉取并解密视频: vid=${vid}, quality=${quality}`);
-    const playInfo = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal });
+    const playInfo = await appSource.fetchAppPlayUrl(vid, {
+      quality,
+      allowLowerQuality: true,
+      allowBytevc2: true,
+      allowHevc,
+      allowHevcTranscode: this.canTranscodeHevc(),
+      signal,
+    });
     signal.throwIfAborted();
     if (!playInfo?.url) throw new Error('未获取到有效的视频流链接');
     const { buffer, variant } = await this.downloadFastestMedia(playInfo.variants, playInfo, 25000, signal);
@@ -280,9 +309,12 @@ class StreamService {
     const contentKey = variant.contentKey || playInfo.contentKey;
     const key = Buffer.isBuffer(contentKey) ? contentKey : Buffer.from(contentKey || '', 'hex');
     const tDecrypt = Date.now();
-    const decrypted = decryptMp4Buffer(buffer, key);
-    logger.info('StreamService', `[Decrypt] 全集视频解密完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 解密耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
-    this.cache.set(`${vid}:${quality}`, { buffer: decrypted, size: decrypted.length });
+    const shouldTranscode = this.needsTranscode(variant.codec, allowHevc);
+    const decrypted = shouldTranscode
+      ? await this.transcode(buffer, key, signal)
+      : decryptMp4Buffer(buffer, key);
+    logger.info('StreamService', `[Decrypt] 全集视频${shouldTranscode ? '转码' : '解密'}完成: vid=${vid}, 输入=${buffer.length} 字节, 输出=${decrypted.length} 字节, 耗时=${Date.now() - tDecrypt}ms, 总耗时=${Date.now() - t0}ms`);
+    this.cache.set(this.cacheKey(vid, quality, allowHevc), { buffer: decrypted, size: decrypted.length });
     this.pruneCache();
     return decrypted;
   }
@@ -295,6 +327,7 @@ class StreamService {
     this.planPrefetch?.abort();
     for (const controller of this.streamControllers) controller.abort(new Error('Player stopped'));
     this.cache.clear();
+    this.fragmentCache.clear();
     this.plans.clear();
     this.consumedRefreshes.clear();
   }
@@ -302,9 +335,9 @@ class StreamService {
   /**
    * 预加载下一集 (Prefetch)
    */
-  prefetch(vid, quality = 'auto', metadataOnly = false, minValidityMs = 0, nextVids = []) {
+  prefetch(vid, quality = 'auto', metadataOnly = false, minValidityMs = 0, nextVids = [], allowHevc = true) {
     if (!vid || !/^\d{1,30}$/.test(String(vid))) return;
-    const key = `${vid}:${quality}`;
+    const key = this.cacheKey(vid, quality, allowHevc);
     if (metadataOnly && this.plans.get(key)?.expires > Date.now() + minValidityMs) return;
     if (this.cache.has(key) || this.inFlight.has(key) || this.prefetchTimers.has(key)) return;
     // Range and HEAD probes must not create a timer for every browser request.
@@ -319,14 +352,14 @@ class StreamService {
       if (metadataOnly) {
         const controller = new AbortController();
         this.planPrefetch = controller;
-        this.getStreamingPlan(String(vid), quality, controller.signal, minValidityMs, nextVids).then(() => {
+        this.getStreamingPlan(String(vid), quality, controller.signal, minValidityMs, nextVids, false, allowHevc).then(() => {
           logger.info('StreamService', `[Prefetch] 成功预热下一集流分片元数据: vid=${vid}`);
         }).catch(error => {
           if (!controller.signal.aborted) logger.warn('StreamService', `[Prefetch] 下一集元数据预热失败: ${error.message}`);
         }).finally(() => { if (this.planPrefetch === controller) this.planPrefetch = null; });
         return;
       }
-      this.getDecryptedBuffer(vid, quality, { background: true }).then(() => {
+      this.getDecryptedBuffer(vid, quality, { background: true, allowHevc }).then(() => {
         logger.info('StreamService', `[Prefetch] 成功后台预解密下一集视频: vid=${vid}`);
       }).catch(err => {
         logger.warn('StreamService', `[Prefetch] 预加载分集 ${vid} 失败: ${err.message}`);
@@ -351,13 +384,26 @@ class StreamService {
   /**
    * 处理 HTTP Range 播放请求 (边下边解边播的核心接口)
    */
-  async getStreamingPlan(vid, quality, signal, minValidityMs = 0, nextVids = []) {
-    const key = `${vid}:${quality}`;
+  async getStreamingPlan(vid, quality, signal, minValidityMs = 0, nextVids = [], progressive = false, allowHevc = true) {
+    const key = this.cacheKey(vid, quality, allowHevc);
     const cached = this.plans.get(key);
     if (cached && (cached.active || cached.expires > Date.now() + minValidityMs)) { this.plans.delete(key); this.plans.set(key, cached); return cached.plan; }
     const t0 = Date.now();
     logger.info('StreamService', `开始构建流式分片播放计划: vid=${vid}, quality=${quality}`);
-    const info = await appSource.fetchAppPlayUrl(vid, { quality, allowLowerQuality: true, signal, nextVids });
+    const info = await appSource.fetchAppPlayUrl(vid, {
+      quality,
+      allowLowerQuality: true,
+      allowBytevc2: true,
+      allowHevc,
+      allowHevcTranscode: this.canTranscodeHevc(),
+      signal,
+      nextVids,
+    });
+    if (this.needsTranscode(info.codec, allowHevc)) {
+      return progressive && Number.isFinite(info.duration) && info.duration > 0 && info.duration <= 86400
+        ? { bytevc2: true, info }
+        : null;
+    }
     let lastError;
     let hasRangeUnsupported = false;
     const rawVariants = info.variants?.length ? info.variants : [info];
@@ -443,14 +489,19 @@ class StreamService {
     const refreshToken = req.query?.refresh ? String(req.query.refresh).trim() : '';
     const isRefresh = Boolean(refreshToken && refreshToken !== '0' && refreshToken !== 'false');
     const quality = normalizeDownloadQuality(req.query?.quality || 'auto');
-    const planKey = `${vid}:${quality}`;
+    const allowHevc = req.query?.hevc !== '0';
+    const planKey = this.cacheKey(vid, quality, allowHevc);
     if (isRefresh) {
-      const refreshKey = `${vid}:${quality}:${refreshToken}`;
+      const refreshKey = `${planKey}:${refreshToken}`;
       if (!this.consumedRefreshes.has(refreshKey)) {
         this.consumedRefreshes.set(refreshKey, Date.now());
-        this.plans.delete(planKey);
+        this.plans.delete(this.cacheKey(vid, quality, true));
+        this.plans.delete(this.cacheKey(vid, quality, false));
         this.plans.delete(String(vid));
-        this.cache.delete(planKey);
+        this.cache.delete(this.cacheKey(vid, quality, true));
+        this.cache.delete(this.cacheKey(vid, quality, false));
+        this.fragmentCache.delete(this.cacheKey(vid, quality, true));
+        this.fragmentCache.delete(this.cacheKey(vid, quality, false));
         this.cache.delete(String(vid));
         appSource.clearEntryCache?.(vid);
         logger.info('StreamService', `收到单次有效刷新指令，已清空播放计划与模型缓存: vid=${vid}, token=${refreshToken}`);
@@ -472,14 +523,64 @@ class StreamService {
     }
     try {
       logger.info('StreamService', `收到流媒体Range请求: vid=${vid}, Range=${req.headers.range || '全量'}, quality=${quality}`);
-      if (this.cache.has(planKey) || this.cache.has(String(vid))) {
+      if (this.cache.has(planKey) || (allowHevc && this.cache.has(String(vid)))) {
         logger.info('StreamService', `命中完整视频内存缓存，直接进入缓冲分片播放: vid=${vid}, quality=${quality}`);
-        return await this.handleBufferedStream(req, res, vid);
+        return await this.handleBufferedStream(req, res, vid, allowHevc);
       }
-      const plan = await this.getStreamingPlan(vid, quality, controller.signal, 0, nextVids);
-      if (!plan) return await this.handleBufferedStream(req, res, vid);
+      const cachedFragment = this.fragmentCache.get(planKey);
+      if (cachedFragment && (req.query?.mse === '1' || req.query?.mse === 'stream')) {
+        this.fragmentCache.delete(planKey);
+        this.fragmentCache.set(planKey, cachedFragment);
+        if (req.query.mse === 'stream') {
+          res.writeHead(200, { 'Content-Type': 'video/mp4', 'Content-Length': cachedFragment.buffer.length, 'Cache-Control': 'no-store' });
+          res.end(cachedFragment.buffer);
+        } else {
+          res.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Stream-Mode': 'bytevc2-progressive' });
+          res.end(JSON.stringify({ code: 'BYTEVC2_PROGRESSIVE', duration: cachedFragment.duration }));
+        }
+        return;
+      }
+      const progressive = req.query?.mse === '1' || req.query?.mse === 'stream';
+      const plan = await this.getStreamingPlan(vid, quality, controller.signal, 0, nextVids, progressive, allowHevc);
+      if (!plan) return await this.handleBufferedStream(req, res, vid, allowHevc);
       const planEntry = this.plans.get(planKey);
       if (planEntry?.plan === plan) planEntry.active = true;
+      if (plan.bytevc2) {
+        if (req.query?.mse !== 'stream') {
+          res.writeHead(409, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Stream-Mode': 'bytevc2-progressive' });
+          res.end(JSON.stringify({ code: 'BYTEVC2_PROGRESSIVE', duration: plan.info.duration }));
+          return;
+        }
+        if (req.method === 'HEAD') { res.writeHead(405); res.end(); return; }
+        const existing = this.inFlight.get(planKey);
+        if (existing?.background) existing.controller.abort(new Error('Progressive playback started'));
+        const { buffer, variant } = await this.downloadFastestMedia(plan.info.variants, plan.info, 25000, controller.signal);
+        const rawKey = variant.contentKey || plan.info.contentKey;
+        const key = Buffer.isBuffer(rawKey) ? rawKey : Buffer.from(rawKey || '', 'hex');
+        res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+        const service = this;
+        async function* collectFragments() {
+          const started = Date.now();
+          let size = 0;
+          let chunks = [];
+          for await (const chunk of service.progressiveTranscode(buffer, key, controller.signal)) {
+            if (!size) logger.info('StreamService', `[ByteVC2] 首批转换数据就绪: vid=${vid}, 耗时=${Date.now() - started}ms`);
+            size += chunk.length;
+            if (chunks && size <= 64 * 1024 * 1024) chunks.push(chunk);
+            else chunks = null;
+            yield chunk;
+          }
+          if (chunks && !controller.signal.aborted) {
+            service.fragmentCache.set(planKey, { buffer: Buffer.concat(chunks, size), duration: plan.info.duration });
+            while (service.fragmentCache.size > 2 || [...service.fragmentCache.values()].reduce((n, item) => n + item.buffer.length, 0) > 64 * 1024 * 1024) {
+              service.fragmentCache.delete(service.fragmentCache.keys().next().value);
+            }
+          }
+          logger.info('StreamService', `[ByteVC2] 分片转换完成: vid=${vid}, 输出=${size} 字节, 耗时=${Date.now() - started}ms`);
+        }
+        await pipeline(Readable.from(collectFragments(), { objectMode: false }), res);
+        return;
+      }
       const total = plan.size;
       let start = 0, end = total - 1;
       if (req.headers.range) {
@@ -504,7 +605,8 @@ class StreamService {
       await pipeline(Readable.from(plan.read(start, end, controller.signal), { objectMode: false, highWaterMark: 64 * 1024 }), res);
       logger.info('StreamService', `流式分片传输完成: vid=${vid}, 区间=${start}-${end}/${total}, 耗时=${Date.now() - t0}ms`);
       const followVids = nextVids.filter(v => v !== String(req.query?.next_vid) && v !== String(vid));
-      this.prefetch(req.query?.next_vid, quality, true, 0, followVids);
+      if (allowHevc) this.prefetch(req.query?.next_vid, quality, true, 0, followVids);
+      else this.prefetch(req.query?.next_vid, quality, true, 0, followVids, false);
     } catch (error) {
       const isClientAbort = controller.signal.aborted ||
         error.name === 'AbortError' ||
@@ -537,14 +639,14 @@ class StreamService {
     }
   }
 
-  async handleBufferedStream(req, res, vid) {
+  async handleBufferedStream(req, res, vid, allowHevc = req.query?.hevc !== '0') {
     try {
       const controller = new AbortController();
       const disconnected = () => { if (!res.writableEnded) controller.abort(new Error('Playback disconnected')); };
       res.once?.('close', disconnected);
       let buffer;
       try {
-        buffer = await this.getDecryptedBuffer(vid, req.query?.quality || 'auto', { signal: controller.signal });
+        buffer = await this.getDecryptedBuffer(vid, req.query?.quality || 'auto', { signal: controller.signal, allowHevc });
       } finally {
         res.removeListener?.('close', disconnected);
       }
@@ -557,7 +659,10 @@ class StreamService {
         }
       }
       const followVids = nextVids.filter(v => v !== String(req.query?.next_vid) && v !== String(vid));
-      if (req.method === 'GET' && !res.destroyed) this.prefetch(req.query?.next_vid, req.query?.quality || 'auto', false, 0, followVids);
+      if (req.method === 'GET' && !res.destroyed) {
+        if (allowHevc) this.prefetch(req.query?.next_vid, req.query?.quality || 'auto', false, 0, followVids);
+        else this.prefetch(req.query?.next_vid, req.query?.quality || 'auto', false, 0, followVids, false);
+      }
       const total = buffer.length;
       const range = req.headers.range;
 
