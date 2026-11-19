@@ -60,6 +60,13 @@ How to review the next batch:
 The unit tests for omitted upstream client features remain skipped. TV asset generation passed, but the APK build and
 device test were not run: the Android toolchain and a connected TV were unavailable.
 
+## Reviewed up to `f57df9c` (2026-11-19)
+
+| Commit | Decision | Reason |
+|---|---|---|
+| `79ca8f3` #103 | Partly taken | Session cookie jar and request diagnostics (`device-session.js`, `playback-device.js`). Left out the `/api/device` endpoints, danmaku and version routes in `index.js`, which this fork does not have |
+| `f57df9c` #100, #104 | Skip for now | Multi-cluster fallback and HEVC fallback are tangled with ByteVC2 and client changes (22 conflict hunks in 8 files). Revisit together with ByteVC2 |
+
 ## Open
 
 - Revisit #30 (intro preview) when there is time to make the popup D-pad friendly.
