@@ -6,20 +6,19 @@ adds an Android TV app (`tv-app/`) that shows the same web UI. Read this before 
 ## Branches and upstream
 
 - Remotes: `origin` is this fork (`aar0u/hongguo-open-player`), `upstream` is `zfdang/hongguo-open-player`.
-- Work happens on `main`. This fork does not track upstream wholesale: check upstream now and then and take only what
-  is useful.
-- Review upstream: `git fetch upstream` and `git log --oneline main..upstream/main`. Take a commit with
-  `git cherry-pick <sha>` (or merge a range), and skip the rest. `UPSTREAM.md` records what was decided so far, and
-  the last step of each review is `git merge -s ours upstream/main` so only new commits show up next time.
-- After taking upstream changes to `src/client`, rebuild and test on a TV. The TV build transpiles `src/client`, so
+- Work happens on `main`, which has `upstream/main` as an ancestor. Update with `git fetch upstream && git merge
+  upstream/main`; never use `-s ours` (it hides upstream's changes from later merges). `UPSTREAM.md` has the steps and
+  the patches carried on top of upstream.
+- After merging upstream changes to `src/client`, rebuild and test on a TV. The TV build transpiles `src/client`, so
   upstream UI changes flow in automatically but can break selectors used in `tv-app/tv-player.js` (for example a
   new header control or a renamed class).
 - This fork keeps only two workflows: `ci.yml` (offline unit tests) and `tv-apk.yml`. Upstream's
   `build-release.yml` (Electron installers on `v*` tags) and `live-verification.yml` (calls the real upstream APIs)
-  were removed on purpose. When cherry-picking, leave out upstream commits that only touch those two files.
+  were removed on purpose. If a merge brings them back, delete them again.
 - Commit locally with conventional messages. The owner pushes.
 - Files outside `tv-app/` that this edition changes: `src/server/index.js` (`HOST` env var, default `127.0.0.1`),
-  `.gitignore`, `start-lan.sh`, `.github/workflows/tv-apk.yml`. Keep that list short so cherry-picks stay clean.
+  `.gitignore`, `start-lan.sh`, `.github/workflows/`. Keep that list short so merges stay clean. Do not delete
+  upstream features from `src/`.
 
 ## Architecture
 
